@@ -14,6 +14,13 @@ import {
   formatGeo,
 } from '../../services/exchange-registry/format';
 import { GeoEngine } from '../../services/geo-engine';
+import { VerificationStore, staleClaims } from '../../services/verification-engine';
+import {
+  formatVerify,
+  formatConfidence,
+  formatStale,
+  formatEvidence,
+} from '../../services/verification-engine/format';
 import { logger } from '../../src/logger';
 
 /**
@@ -51,6 +58,7 @@ async function main() {
   const exchanges = new ExchangeRegistry();
   const bonuses = new BonusStore();
   const geo = new GeoEngine(exchanges.all());
+  const verifications = new VerificationStore(exchanges.all());
   let running = false;
 
   // Guard against rapid repeated Approve clicks while a publish is in flight.
@@ -90,7 +98,7 @@ async function main() {
         `This chat id: <code>${msg.chat.id}</code>`,
         '',
         'Set <code>TELEGRAM_MODERATION_CHAT_ID</code> to this id in your .env to receive drafts here.',
-        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz',
+        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence',
       ].join('\n'),
       { parse_mode: 'HTML' },
     );
@@ -179,6 +187,39 @@ async function main() {
     if (!reportGate(msg)) return;
     const country = (match?.[1] ?? 'KZ').toUpperCase();
     void sendHtml(msg.chat.id, formatGeo(geo.profilesFor(country), country));
+  });
+
+  // Verification / trust commands (EPIC 003). Read-only, admin-gated.
+  // /verify <slug> — KZ snapshot + per-claim confidence/freshness
+  bot.onText(/\/verify(?:\s+(\S+))?/, (msg, match) => {
+    if (!reportGate(msg)) return;
+    const slug = (match?.[1] ?? '').toLowerCase();
+    if (!slug) {
+      void sendHtml(msg.chat.id, 'Usage: <code>/verify bybit</code>');
+      return;
+    }
+    void sendHtml(msg.chat.id, formatVerify(exchanges.get(slug), verifications.all()));
+  });
+
+  bot.onText(/\/confidence\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatConfidence(exchanges.all(), verifications.all()));
+  });
+
+  bot.onText(/\/stale\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatStale(staleClaims(verifications.all())));
+  });
+
+  // /evidence <slug>
+  bot.onText(/\/evidence(?:\s+(\S+))?/, (msg, match) => {
+    if (!reportGate(msg)) return;
+    const slug = (match?.[1] ?? '').toLowerCase();
+    if (!slug) {
+      void sendHtml(msg.chat.id, 'Usage: <code>/evidence bybit</code>');
+      return;
+    }
+    void sendHtml(msg.chat.id, formatEvidence(slug, verifications.all()));
   });
 
   // Lock a moderation message: append a status stamp and remove the buttons.

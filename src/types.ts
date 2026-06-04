@@ -327,3 +327,97 @@ export interface AffiliateMeta {
   refCode: string | null;
   campaign: string | null;
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// VERIFICATION / TRUST LAYER (EPIC 003 — Kazakhstan GEO verification)
+//
+// Turns the static exchange/GEO/bonus data into VERIFIABLE claims backed by
+// evidence, with freshness tracking and a 0-100 confidence score. The guiding
+// rule: accuracy over speed, and uncertainty over hallucination. Nothing here
+// publishes; a human reviewer attaches evidence and the system scores it.
+// ───────────────────────────────────────────────────────────────────────────
+
+/** Where a piece of evidence came from (ordered loosely by authority). */
+export type EvidenceType =
+  | 'official_docs'
+  | 'official_support'
+  | 'exchange_ui'
+  | 'user_report'
+  | 'manual_review';
+
+/** What an evidence-backed claim is about. */
+export type ClaimType =
+  | 'availability'
+  | 'geo_restriction'
+  | 'kyc'
+  | 'p2p'
+  | 'fiat'
+  | 'bonus'
+  | 'launchpool';
+
+/** Freshness lifecycle of a claim / evidence. */
+export type FreshnessStatus = 'fresh' | 'aging' | 'stale' | 'expired';
+
+/** A single piece of evidence supporting (or refuting) a claim. */
+export interface Evidence {
+  id: string;
+  sourceUrl: string;
+  type: EvidenceType;
+  note: string;
+  /** When this evidence was gathered / verified. */
+  verifiedAt: string;
+  /** When this evidence should no longer be trusted (null = no hard expiry). */
+  expiresAt: string | null;
+  /** verified = confirms the claim, unverified = unconfirmed, outdated = was true. */
+  status: VerificationStatus;
+  /** Who recorded it (human reviewer handle or "system"). */
+  reviewer: string;
+}
+
+/** A verifiable claim about one exchange in one country, with its evidence. */
+export interface VerificationClaim {
+  /** Stable id, e.g. "bybit:KZ:p2p". */
+  id: string;
+  exchangeSlug: string;
+  country: string;
+  type: ClaimType;
+  /** The asserted value as a string, e.g. "true" / "basic" / "KZT". */
+  assertion: string;
+  evidence: Evidence[];
+  /** Set true when evidence disagree (forces a confidence penalty). */
+  conflicting: boolean;
+  /** Days after the last check before the claim is considered stale. */
+  staleAfterDays: number;
+  /** Last time the claim was reviewed (null = never properly checked). */
+  lastCheckedAt: string | null;
+}
+
+/** Computed verdict for a claim (never persisted as source of truth). */
+export interface ClaimVerdict {
+  id: string;
+  exchangeSlug: string;
+  country: string;
+  type: ClaimType;
+  assertion: string;
+  confidence: number; // 0-100
+  freshness: FreshnessStatus;
+  /** True only when confidence is high AND data is fresh/aging. */
+  reliable: boolean;
+  evidenceCount: number;
+}
+
+/** A Kazakhstan availability snapshot for one exchange (Phase 5). */
+export interface KzGeoSnapshot {
+  exchangeSlug: string;
+  name: string;
+  country: string; // 'KZ'
+  kyc: KycLevel;
+  p2p: boolean;
+  kzt: boolean;
+  localBanks: string[];
+  notes: string;
+  confidence: number; // aggregate 0-100
+  freshness: FreshnessStatus; // worst across contributing claims
+  reliable: boolean;
+  generatedAt: string;
+}
