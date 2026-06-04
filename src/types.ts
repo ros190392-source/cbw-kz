@@ -421,3 +421,81 @@ export interface KzGeoSnapshot {
   reliable: boolean;
   generatedAt: string;
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// MULTILINGUAL / MULTI-GEO FOUNDATION (EPIC 004)
+//
+// Locale architecture for future CBW expansion (KZ, Germany, Turkey, Nigeria,
+// India). FOUNDATION ONLY: structures + routing + a translation MODERATION flow.
+// No auto-translation, no auto-publishing, no fake localization. Low-confidence
+// localization stays flagged for human review.
+// ───────────────────────────────────────────────────────────────────────────
+
+/** BCP-47-ish locale tag, e.g. "ru-KZ", "de-DE". */
+export type LocaleCode = string;
+
+/** A configured locale (language + country + monetization defaults). */
+export interface LocaleDefinition {
+  code: LocaleCode;
+  language: string;        // ISO 639-1, e.g. "ru"
+  languageName: string;    // human-readable, e.g. "Russian"
+  country: string;         // ISO 3166-1 alpha-2, e.g. "KZ"
+  /** Locale to fall back to when content is missing (null = no fallback). */
+  fallback: LocaleCode | null;
+  defaultCurrency: string; // e.g. "KZT"
+  timezone: string;        // IANA tz, e.g. "Asia/Almaty"
+  /** Exchange slugs preferred for this market (ordered). */
+  preferredExchanges: string[];
+  /** Local payment rails, e.g. ["Kaspi", "Halyk"]. */
+  localPaymentMethods: string[];
+}
+
+/** Lifecycle of a translation (Phase 4) — human approval is mandatory. */
+export type TranslationStatus =
+  | 'untranslated'
+  | 'machine_translated'
+  | 'human_review_required'
+  | 'approved'
+  | 'rejected';
+
+/** One localized field/string with its moderation state. */
+export interface LocalizedField {
+  locale: LocaleCode;
+  /** The localized text (empty when untranslated). */
+  text: string;
+  status: TranslationStatus;
+  /** Optional confidence 0-100 for machine output (flags low-quality MT). */
+  confidence: number | null;
+  reviewer: string | null;
+  updatedAt: string;
+}
+
+/**
+ * A localized content bundle for one source post in one locale. Holds title,
+ * summary, a CTA placeholder and exchange notes — each individually moderated.
+ * Nothing here is published automatically.
+ */
+export interface LocalizedContent {
+  sourceId: string;       // originating NewsItem / DraftRecord id
+  locale: LocaleCode;
+  title: LocalizedField;
+  summary: LocalizedField;
+  /** CTA placeholder text (still never auto-injected — see affiliate-layer). */
+  cta: LocalizedField;
+  exchangeNotes: LocalizedField;
+  /** Overall status = lowest common state across fields. */
+  status: TranslationStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Engagement performance for one locale (multi-GEO analytics, Phase 5). */
+export interface LocalePerformance {
+  locale: LocaleCode;
+  country: string;
+  posts: number;
+  avgScore: number;
+  totalEngagement: number;
+  avgEngagement: number;
+  topExchange: string | null;
+}

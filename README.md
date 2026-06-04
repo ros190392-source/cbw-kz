@@ -42,7 +42,8 @@ cbw-kz/
 │   ├── exchange-registry/   # Exchange + bonus registry, trust verification
 │   ├── geo-engine/          # GEO compatibility (availability/P2P/KYC/fiat by country)
 │   ├── affiliate-layer/     # Affiliate metadata + CTA helpers (NEVER auto-injected)
-│   └── verification-engine/ # Evidence, confidence scoring, freshness, KZ snapshots
+│   ├── verification-engine/ # Evidence, confidence scoring, freshness, KZ snapshots
+│   └── locale-engine/       # Locales, GEO↔language routing, translation moderation
 ├── src/
 │   ├── pipeline.ts          # Orchestrator: fetch→dedupe→score→rewrite→send→log
 │   ├── draft-store.ts       # Draft lifecycle store (data/drafts.json)
@@ -644,16 +645,91 @@ bonuses are outdated/unverified — feeding the trust health of the KZ matrix.
 
 ---
 
-## 14. Roadmap (foundation is built for this)
+## 14. Multilingual & multi-GEO foundation
+
+The locale layer (`services/locale-engine`) prepares CBW for expansion beyond
+Kazakhstan — Germany, Turkey, Nigeria, India — with locale routing, GEO↔language
+mapping, localized content scaffolding, and a translation **moderation** flow.
+
+> **Foundation + philosophy.** This builds *structure*, not content. We do **not**
+> auto-translate, **not** auto-publish translations, and **never** fabricate
+> localization. Machine translation is a draft input only — low-confidence MT is
+> forced to `human_review_required`, and a bundle is `approved` only when a human
+> approves every field. Human moderation stays mandatory.
+
+### Locale schema (Phase 1)
+
+Locales: `kk-KZ`, `ru-KZ`, `en-US`, `de-DE`, `tr-TR`, `hi-IN`. Each defines:
+
+| Field | Meaning |
+|---|---|
+| `code` / `language` / `languageName` / `country` | Identity |
+| `fallback` | Locale to fall back to (e.g. `kk-KZ → ru-KZ → en-US`); `en-US` has none |
+| `defaultCurrency` / `timezone` | Market defaults (e.g. `KZT` / `Asia/Almaty`) |
+| `preferredExchanges` | Registry slugs preferred in this market |
+| `localPaymentMethods` | Local rails (Kaspi, SEPA, Papara, UPI, …) |
+
+### GEO ↔ language mapping (Phase 2)
+
+```
+KZ → ru-KZ, kk-KZ      DE → de-DE, en-US      TR → tr-TR
+IN → hi-IN, en-US      NG → en-US             (unknown) → en-US
+```
+
+Functions: `preferredLocales(country)`, `fallbackLocale(locale)`,
+`resolveLocaleChain(locale)`, and `supportsLocale(exchange, locale)` (true when
+the exchange operates in the locale's country per the GEO engine — e.g. a
+US-restricted exchange does **not** support `en-US`).
+
+### Localized content + translation workflow (Phase 3-4)
+
+`newLocalizedContent(sourceId, locale)` scaffolds a bundle with localized
+`title`, `summary`, `cta` (a `{{CTA}}` placeholder — still never auto-injected)
+and `exchangeNotes`, each individually moderated through:
+
+```
+untranslated → machine_translated → human_review_required → approved
+                     │                                       └ (rejected blocks the bundle)
+                     └ low MT confidence routes straight to human_review_required
+```
+
+The bundle's aggregate status is the **least-progressed** field (and `rejected`
+if any field is), so partial localization never counts as done.
+
+### Multi-GEO analytics (Phase 5)
+
+`localePerformance(records)` groups published-post engagement by locale
+(derived from GEO tags), with `avgScore`, `avgEngagement` and `topExchange` per
+locale; `bestLocale(records)` returns the strongest market.
+
+### Telegram commands (Phase 6)
+
+| Command | Output |
+|---|---|
+| `/locales` | All locales + currency, fallback, preferred exchanges, payments |
+| `/geo <country>` | Supported locales, payments/fiat, available exchanges + trust (e.g. `/geo de`, `/geo tr`, `/geo in`, `/geo ng`) |
+
+### Tests
+
+| Suite | Covers |
+|---|---|
+| [`tests/locale-engine.test.ts`](tests/locale-engine.test.ts) | locale routing, fallback chains, GEO-language mapping, `supportsLocale`, localized structures, translation statuses, multi-GEO analytics |
+
+---
+
+## 15. Roadmap (foundation is built for this)
 
 The architecture is deliberately modular to support, without rewrites:
 
-- multi-GEO + GEO filtering (GEO engine in place; extend beyond KZ)
+- ✅ multi-GEO foundation + GEO↔language routing (EPIC 004 — locales for KZ/DE/
+  TR/NG/IN; extend with real translation providers + per-locale channels next)
 - multiple Telegram channels
 - ✅ affiliate layer + bonus engine (EPIC 002 — built; affiliate auto-injection
   remains intentionally disabled, pending human-reviewed CTA placement)
 - ✅ trust & verification layer (EPIC 003 — evidence, confidence, freshness, KZ
   snapshots; extend evidence sources + multi-country claims next)
+- ✅ multilingual foundation (EPIC 004 — locale engine + translation moderation
+  flow; wire MT providers + localized publishing under human review next)
 - AI scoring & ranking
 - scheduling
 - **analytics dashboard** — a UI over the normalized records + historical
@@ -661,7 +737,6 @@ The architecture is deliberately modular to support, without rewrites:
 - **AI learning layer** — consuming `feedback-engine` patterns to suggest (never
   auto-apply) scoring adjustments, with human review
 - real engagement metrics via MTProto / analytics export (collector is ready)
-- multilingual expansion
 
 Each future capability slots in as a new service or a config-driven extension
 of the existing pipeline stages.
