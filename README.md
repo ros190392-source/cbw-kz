@@ -38,7 +38,10 @@ cbw-kz/
 │   ├── telegram-sender/     # Draft delivery + channel publish (manual Approve only)
 │   ├── analytics-layer/     # Tracks published posts + engagement → aggregations
 │   ├── reporting-engine/    # Daily/weekly reports from analytics + draft lifecycle
-│   └── feedback-engine/     # AI-feedback FOUNDATION: labels post patterns (no model)
+│   ├── feedback-engine/     # AI-feedback FOUNDATION: labels post patterns (no model)
+│   ├── exchange-registry/   # Exchange + bonus registry, trust verification
+│   ├── geo-engine/          # GEO compatibility (availability/P2P/KYC/fiat by country)
+│   └── affiliate-layer/     # Affiliate metadata + CTA helpers (NEVER auto-injected)
 ├── src/
 │   ├── pipeline.ts          # Orchestrator: fetch→dedupe→score→rewrite→send→log
 │   ├── draft-store.ts       # Draft lifecycle store (data/drafts.json)
@@ -50,9 +53,10 @@ cbw-kz/
 ├── config/
 │   ├── index.ts             # Typed env config
 │   └── sources.ts           # RSS source list (add new sources here)
-├── tests/                   # Vitest suites (scoring, analytics, reporting)
+├── tests/                   # Vitest suites (scoring, analytics, reporting, geo, registry)
 ├── data/                    # processed.json, drafts.json, post-analytics.json,
-│                            #   analytics-snapshots.json, feedback.json
+│                            #   analytics-snapshots.json, feedback.json,
+│                            #   exchanges.json, bonuses.json
 └── logs/                    # pipeline.log, events.log (JSONL)
 ```
 
@@ -444,13 +448,116 @@ The analytics subsystem has its own regression suites, run by the same CI gate:
 
 ---
 
-## 12. Roadmap (foundation is built for this)
+## 12. Monetization intelligence (exchange registry · GEO · bonuses · affiliate)
+
+The monetization layer is **intelligence + structure only**. It models which
+exchanges work where, what bonuses exist, and how trustworthy that information
+is — so a moderator can make accurate, GEO-correct decisions. It **never**
+injects affiliate links into content and **never** publishes.
+
+> **Monetization philosophy.** This is *not* a spam affiliate engine. Trust,
+> accuracy, verified information and GEO correctness come first. Misleading GEO
+> info, fake bonuses and unverified campaigns are forbidden. Affiliate links are
+> a *suggestion helper* for a human, not an automation.
+
+```
+exchange-registry ──┬─▶ geo-engine        (availability / P2P / KYC / fiat by country)
+ (data/exchanges.json)│
+ (data/bonuses.json)  ├─▶ bonus engine     (signup/deposit/trading/launchpool/… + verification)
+                      └─▶ affiliate-layer  (metadata + CTA helpers, NEVER auto-injected)
+```
+
+### Exchange registry (`services/exchange-registry`)
+
+Structured records for Bybit, Binance, OKX, Bitget, MEXC, BingX, KuCoin, HTX and
+Gate.io, persisted to `data/exchanges.json` (seeded from code on first run).
+
+**Exchange schema:**
+
+| Field | Meaning |
+|---|---|
+| `name` / `slug` | Display name + stable id |
+| `officialUrl` / `affiliateUrl` | Official site + tracking-ready URL (defaults to official until a code lands) |
+| `supportedGeos` / `restrictedGeos` | ISO country codes (`*` = global allow); restrictions win |
+| `kyc` | `none` / `basic` / `full` |
+| `p2p` / `fiat` | Global P2P flag + fiat rails |
+| `kazakhstan` | Dedicated KZ block: `{ available, p2p, kyc, fiat[], notes }` |
+| `trustLevel` | `high` / `medium` / `low` |
+| `notes` / `lastReviewedAt` | Human notes + review timestamp (`null` = needs review) |
+
+> ⚠️ Seed values are a **conservative baseline** — every KZ/KYC/P2P field must be
+> human-verified before it is used in published content.
+
+### GEO engine (`services/geo-engine`)
+
+GEO correctness is the priority. Kazakhstan (`KZ`) is resolved from each
+exchange's `kazakhstan` block; other countries fall back to supported/restricted
+lists. Core functions: `isAvailable`, `supportsP2P`, `kycLevel` / `requiresKYC`,
+`supportsFiat` (KZT, Kaspi, Halyk, Freedom, local-cards), plus `profilesFor(country)`.
+
+```
+bybit  → KZ: available ✅  P2P ✅  KYC basic  KZT ✅  Kaspi ✅
+mexc   → KZ: available ✅  P2P ✅  KYC none   KZT ✅
+bybit  → US: available ❌ (restricted)   DE: available ✅
+```
+
+### Bonus engine + trust verification
+
+Bonuses (signup / deposit / trading / launchpool / launchpad / campaign /
+competition) carry `startDate`, `expiryDate`, `sourceUrl` and a
+`verification { status, source, lastCheckedAt }` block. Verification status is
+**freshness-aware**:
+
+| State | Rule |
+|---|---|
+| `unverified` | never checked (the default for all seeds) |
+| `verified` | confirmed against a source within the TTL (30 days) |
+| `outdated` | was verified, but the check is now stale |
+
+`isPublishableBonus()` is true **only** when a bonus is verified-fresh **and**
+active — so unverified/expired claims can never be presented as fact. All seed
+bonuses ship `unverified` on purpose.
+
+### Affiliate layer (`services/affiliate-layer`)
+
+Affiliate **metadata** + a tracking-ready `buildAffiliateUrl()` (appends `ref` /
+`utm_campaign` only when present — never fabricated) + `buildCta()` which returns
+a CTA **suggestion string** for a moderator. The constant `AFFILIATE_AUTO_INJECT
+= false` is the single source of truth: **nothing is auto-appended to drafts or
+posts.**
+
+### Admin commands (moderation chat, admin-gated)
+
+| Command | Output |
+|---|---|
+| `/exchanges` | Registry with KZ availability, trust, KYC, P2P, fiat |
+| `/bonuses` | Tracked bonuses with verification status + active flag |
+| `/launchpool` | Active launchpools / launchpads |
+| `/geo kz` | GEO compatibility for a country (defaults to KZ) |
+
+### Analytics integration (Phase 7)
+
+`analytics-layer` already aggregates published-post performance
+`byExchange`; EPIC 002 adds `aggregateByGeo`, so reports can surface which
+exchanges and which GEO-tagged posts perform best.
+
+### Tests
+
+| Suite | Covers |
+|---|---|
+| [`tests/geo-engine.test.ts`](tests/geo-engine.test.ts) | availability, restrictions, P2P, KYC, fiat, GeoEngine wrapper |
+| [`tests/exchange-registry.test.ts`](tests/exchange-registry.test.ts) | bonus validation, active windows, trust verification, registry/bonus persistence, affiliate helpers |
+
+---
+
+## 13. Roadmap (foundation is built for this)
 
 The architecture is deliberately modular to support, without rewrites:
 
-- multi-GEO + GEO filtering
+- multi-GEO + GEO filtering (GEO engine in place; extend beyond KZ)
 - multiple Telegram channels
-- affiliate layer + bonus engine
+- ✅ affiliate layer + bonus engine (EPIC 002 — built; affiliate auto-injection
+  remains intentionally disabled, pending human-reviewed CTA placement)
 - AI scoring & ranking
 - scheduling
 - **analytics dashboard** — a UI over the normalized records + historical
