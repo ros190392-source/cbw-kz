@@ -43,7 +43,8 @@ cbw-kz/
 │   ├── geo-engine/          # GEO compatibility (availability/P2P/KYC/fiat by country)
 │   ├── affiliate-layer/     # Affiliate metadata + CTA helpers (NEVER auto-injected)
 │   ├── verification-engine/ # Evidence, confidence scoring, freshness, KZ snapshots
-│   └── locale-engine/       # Locales, GEO↔language routing, translation moderation
+│   ├── locale-engine/       # Locales, GEO↔language routing, translation moderation
+│   └── editorial-planner/   # Editorial brain: topics, prioritization, calendar
 ├── src/
 │   ├── pipeline.ts          # Orchestrator: fetch→dedupe→score→rewrite→send→log
 │   ├── draft-store.ts       # Draft lifecycle store (data/drafts.json)
@@ -717,7 +718,88 @@ locale; `bestLocale(records)` returns the strongest market.
 
 ---
 
-## 15. Roadmap (foundation is built for this)
+## 15. Editorial planning (editorial brain)
+
+The editorial planner (`services/editorial-planner`) is the layer that turns all
+the data — analytics, exchange registry, bonus engine, verification freshness,
+locales, scoring categories — into structured editorial **recommendations**:
+what to post today, which exchange/bonus to feature, which stale GEO data to
+refresh, which categories and locales are undercovered.
+
+> **Human-in-the-loop philosophy.** The planner **recommends, it never
+> executes**. No auto-publishing, no auto-approval, no fake/hype content, and no
+> "verified" bonus is invented. Every topic states the verification status
+> required *before* it could be published; the human still approves and posts.
+
+### Topic schema (Phase 2)
+
+Topic types: `news`, `bonus`, `launchpool`, `p2p`, `kyc`, `regulation`,
+`education`, `comparison`, `warning`, `evergreen`. Each topic carries:
+
+| Field | Meaning |
+|---|---|
+| `title` / `type` | What to write + its kind |
+| `exchange` / `geo` / `locale` | Targeting (slug / country / locale) |
+| `priority` (0-100) + `priorityBand` | Ranking (`high ≥ 70`, `medium ≥ 45`, `low`) |
+| `reason` | Why the planner is recommending it |
+| `confidence` (0-100) | Verification-derived where relevant |
+| `suggestedCta` | A `{{CTA}}` placeholder — never auto-injected |
+| `requiredVerification` | What must be true before publishing (e.g. bonuses need `verified`) |
+
+### Prioritization (Phase 3)
+
+**Up:** verified+active bonuses, stale-but-important GEO data (weighted by
+exchange trust), top-performing categories, undercovered local payment rails
+(Kaspi/Halyk/Freedom), launchpool opportunities, KZT/P2P topics, multilingual
+gaps. **Down:** unverified/outdated bonuses, low-confidence claims (still
+surfaced as *verify tasks*, but flagged `requiredVerification: verified`), weak
+categories, duplicates (deduped by id + title), and hype (never generated).
+
+### Editorial calendar + content mix (Phase 4)
+
+A balanced mix across five buckets:
+
+| Bucket | Daily | Weekly |
+|---|---|---|
+| news | 2 | 7 |
+| bonus | 1 | 3 |
+| education | 1 | 3 |
+| verification | 1 | 3 |
+| evergreen | 1 | 2 |
+
+Buckets that can't be filled produce an explicit gap note. Example daily plan:
+
+```
+📋 Daily editorial plan — GEO: KZ
+⚖️ Mix: news 2/2 · bonus 1/1 · education 1/1 · verification 1/1 · evergreen 1/1
+
+1. 🟢 Bybit: Bybit Launchpool        (launchpool · prio 88 · 🔒 needs:verified)
+2. 🟢 More "Bonus" coverage           (news · prio 74)
+3. 🟡 Update Binance AVAILABILITY (KZ) — verify   (regulation · prio 67 · 🔒 verified)
+4. 🟡 Update Binance FIAT (KZ) — verify           (p2p · prio 67 · 🔒 verified)
+5. 🟡 Start covering "KZ" (underused category)    (education · prio 56)
+6. 🟡 How to use P2P with KZT safely  (evergreen · prio 46)
+
+Notes: 🕒 36 stale claims · ⚠️ 3 unverified bonuses · ℹ️ Recommendations only — human approves.
+```
+
+### Commands (Phase 5)
+
+| Command | Output |
+|---|---|
+| `/plan` | Daily editorial plan + content mix + notes |
+| `/weekplan` | 7-day plan (weekly mix) |
+| `/backlog` | Full ranked topic backlog |
+
+### Tests
+
+| Suite | Covers |
+|---|---|
+| [`tests/editorial-planner.test.ts`](tests/editorial-planner.test.ts) | topic prioritization, downranking unverified claims, calendar generation, content-mix balance, locale/GEO gap detection |
+
+---
+
+## 16. Roadmap (foundation is built for this)
 
 The architecture is deliberately modular to support, without rewrites:
 
@@ -730,8 +812,10 @@ The architecture is deliberately modular to support, without rewrites:
   snapshots; extend evidence sources + multi-country claims next)
 - ✅ multilingual foundation (EPIC 004 — locale engine + translation moderation
   flow; wire MT providers + localized publishing under human review next)
+- ✅ editorial planning / editorial brain (EPIC 005 — daily/weekly plans, topic
+  backlog, content-mix balance; recommend-only, human approves)
 - AI scoring & ranking
-- scheduling
+- scheduling (planner output is ready to feed a human-reviewed scheduler)
 - **analytics dashboard** — a UI over the normalized records + historical
   snapshots already produced by `analytics-layer` (Phase 7 data structure)
 - **AI learning layer** — consuming `feedback-engine` patterns to suggest (never
