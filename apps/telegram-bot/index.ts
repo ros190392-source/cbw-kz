@@ -11,9 +11,9 @@ import {
   formatExchanges,
   formatBonuses,
   formatLaunchpools,
-  formatGeo,
 } from '../../services/exchange-registry/format';
 import { GeoEngine } from '../../services/geo-engine';
+import { formatLocales, formatGeoExpansion } from '../../services/locale-engine/format';
 import { VerificationStore, staleClaims } from '../../services/verification-engine';
 import {
   formatVerify,
@@ -98,7 +98,7 @@ async function main() {
         `This chat id: <code>${msg.chat.id}</code>`,
         '',
         'Set <code>TELEGRAM_MODERATION_CHAT_ID</code> to this id in your .env to receive drafts here.',
-        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence',
+        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence, /locales',
       ].join('\n'),
       { parse_mode: 'HTML' },
     );
@@ -182,11 +182,17 @@ async function main() {
     void sendHtml(msg.chat.id, formatLaunchpools(bonuses.all(), exchanges.all()));
   });
 
-  // /geo <country>, defaults to KZ. e.g. "/geo kz"
+  // /geo <country>, defaults to KZ. e.g. "/geo kz", "/geo de", "/geo tr"
+  // Locale-aware (EPIC 004): shows supported locales + payments + exchanges.
   bot.onText(/\/geo(?:\s+(\w+))?/, (msg, match) => {
     if (!reportGate(msg)) return;
     const country = (match?.[1] ?? 'KZ').toUpperCase();
-    void sendHtml(msg.chat.id, formatGeo(geo.profilesFor(country), country));
+    void sendHtml(msg.chat.id, formatGeoExpansion(country, geo.profilesFor(country)));
+  });
+
+  bot.onText(/\/locales\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatLocales());
   });
 
   // Verification / trust commands (EPIC 003). Read-only, admin-gated.
