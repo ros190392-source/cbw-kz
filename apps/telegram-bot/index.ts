@@ -15,6 +15,8 @@ import {
 import { GeoEngine } from '../../services/geo-engine';
 import { formatLocales, formatGeoExpansion } from '../../services/locale-engine/format';
 import { VerificationStore, staleClaims } from '../../services/verification-engine';
+import { buildPlan, backlog, PlannerInputs } from '../../services/editorial-planner';
+import { formatPlan, formatBacklog } from '../../services/editorial-planner/format';
 import {
   formatVerify,
   formatConfidence,
@@ -98,7 +100,7 @@ async function main() {
         `This chat id: <code>${msg.chat.id}</code>`,
         '',
         'Set <code>TELEGRAM_MODERATION_CHAT_ID</code> to this id in your .env to receive drafts here.',
-        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence, /locales',
+        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence, /locales, /plan, /weekplan, /backlog',
       ].join('\n'),
       { parse_mode: 'HTML' },
     );
@@ -226,6 +228,30 @@ async function main() {
       return;
     }
     void sendHtml(msg.chat.id, formatEvidence(slug, verifications.all()));
+  });
+
+  // Editorial planning commands (EPIC 005). Read-only recommendations, admin-gated.
+  const plannerInputs = (): PlannerInputs => ({
+    posts: analytics.all(),
+    exchanges: exchanges.all(),
+    bonuses: bonuses.all(),
+    claims: verifications.all(),
+    geo: 'KZ',
+  });
+
+  bot.onText(/\/plan\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatPlan(buildPlan(plannerInputs(), 'daily')));
+  });
+
+  bot.onText(/\/weekplan\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatPlan(buildPlan(plannerInputs(), 'weekly')));
+  });
+
+  bot.onText(/\/backlog\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatBacklog(backlog(plannerInputs())));
   });
 
   // Lock a moderation message: append a status stamp and remove the buttons.

@@ -499,3 +499,65 @@ export interface LocalePerformance {
   avgEngagement: number;
   topExchange: string | null;
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// EDITORIAL PLANNING / EDITORIAL BRAIN (EPIC 005)
+//
+// Generates structured editorial RECOMMENDATIONS from the analytics, registry,
+// bonus, verification and locale layers. Planning only: it recommends, it never
+// executes. No auto-publish, no auto-approve, no fake/hype content. Every topic
+// carries the verification status required before it could be published.
+// ───────────────────────────────────────────────────────────────────────────
+
+export type TopicType =
+  | 'news'
+  | 'bonus'
+  | 'launchpool'
+  | 'p2p'
+  | 'kyc'
+  | 'regulation'
+  | 'education'
+  | 'comparison'
+  | 'warning'
+  | 'evergreen';
+
+/** Planning buckets used to balance the content mix. */
+export type PlanBucket = 'news' | 'bonus' | 'education' | 'verification' | 'evergreen';
+
+export type PriorityBand = 'high' | 'medium' | 'low';
+
+/** A single editorial recommendation. */
+export interface EditorialTopic {
+  id: string;
+  title: string;
+  type: TopicType;
+  /** Exchange slug this topic is about, or null. */
+  exchange: string | null;
+  geo: string;          // country code, e.g. "KZ"
+  locale: LocaleCode;
+  priority: number;     // 0-100
+  priorityBand: PriorityBand;
+  reason: string;
+  confidence: number;   // 0-100 (verification-derived where relevant)
+  /** CTA placeholder only — never auto-injected into content. */
+  suggestedCta: string;
+  /** Verification status required BEFORE this could be published. */
+  requiredVerification: VerificationStatus;
+}
+
+export interface ContentMixItem {
+  bucket: PlanBucket;
+  planned: number;
+  selected: number;
+}
+
+/** A generated editorial plan (daily or weekly) — recommendation only. */
+export interface EditorialPlan {
+  period: 'daily' | 'weekly';
+  generatedAt: string;
+  geoFocus: string;
+  topics: EditorialTopic[];
+  contentMix: ContentMixItem[];
+  /** Editorial guidance: gaps, stale warnings, locale gaps, the human-gate note. */
+  notes: string[];
+}
