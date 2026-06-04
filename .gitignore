@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+*.log
+
+# runtime state (keep the folders, ignore their contents)
+data/*.json
+logs/*.log
+!data/.gitkeep
+!logs/.gitkeep

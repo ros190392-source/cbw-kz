@@ -1,0 +1,28 @@
+{
+  "name": "cbw-kz",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI-powered crypto Telegram media system for Kazakhstan (MVP) — trusted crypto media infrastructure, signal over noise.",
+  "scripts": {
+    "bot": "tsx apps/telegram-bot/index.ts",
+    "pipeline": "tsx src/index.ts",
+    "pipeline:once": "tsx src/index.ts --once",
+    "dev": "tsx watch apps/telegram-bot/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "node-telegram-bot-api": "^0.66.0",
+    "rss-parser": "^3.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/node-telegram-bot-api": "^0.64.7",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.5"
+  }
+}
