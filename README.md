@@ -28,15 +28,21 @@ one pipeline. Each piece can be replaced without touching the others.
 cbw-kz/
 ├── apps/
 │   └── telegram-bot/        # Long-running bot: runs pipeline, delivers drafts,
-│                            #   handles Approve/Reject, commands (/run /status)
+│                            #   handles Approve/Reject, commands (/run /status
+│                            #   /report /weekly /top)
 ├── services/
 │   ├── rss-parser/          # Polls feeds → normalized NewsItem[], stable ids
 │   ├── scoring-layer/       # Ranks + filters every item 0-100 → priority (the gate)
 │   ├── news-rewriter/       # AI rewrite layer (OpenAI-compatible) + fallback
 │   ├── moderation-layer/    # Legacy keyword pre-filter (superseded by scoring-layer)
-│   └── telegram-sender/     # Draft delivery to moderation chat (DRAFT MODE ONLY)
+│   ├── telegram-sender/     # Draft delivery + channel publish (manual Approve only)
+│   ├── analytics-layer/     # Tracks published posts + engagement → aggregations
+│   ├── reporting-engine/    # Daily/weekly reports from analytics + draft lifecycle
+│   └── feedback-engine/     # AI-feedback FOUNDATION: labels post patterns (no model)
 ├── src/
-│   ├── pipeline.ts          # Orchestrator: fetch→dedupe→moderate→rewrite→send→log
+│   ├── pipeline.ts          # Orchestrator: fetch→dedupe→score→rewrite→send→log
+│   ├── draft-store.ts       # Draft lifecycle store (data/drafts.json)
+│   ├── moderation-actions.ts# Pure approve/reject logic (injectable publisher)
 │   ├── storage.ts           # JSON state store (processed ids + dedupe)
 │   ├── logger.ts            # Console + JSONL logs (pipeline.log, events.log)
 │   ├── types.ts             # Shared types
@@ -44,8 +50,9 @@ cbw-kz/
 ├── config/
 │   ├── index.ts             # Typed env config
 │   └── sources.ts           # RSS source list (add new sources here)
-├── tests/                   # Vitest regression suite (scoring-layer.test.ts)
-├── data/                    # processed.json (runtime state)
+├── tests/                   # Vitest suites (scoring, analytics, reporting)
+├── data/                    # processed.json, drafts.json, post-analytics.json,
+│                            #   analytics-snapshots.json, feedback.json
 └── logs/                    # pipeline.log, events.log (JSONL)
 ```
 
@@ -144,9 +151,14 @@ npm run test
    Put that value in `TELEGRAM_MODERATION_CHAT_ID` and restart the bot.
 5. Send **`/run`** to trigger a pass. Drafts arrive with **Approve / Reject**
    buttons. Use **`/status`** to inspect the live config.
+6. Set `TELEGRAM_CHANNEL_ID` (+ make the bot an admin of that channel) and
+   `TELEGRAM_ADMIN_IDS` so a manual **Approve** publishes to the channel.
+7. Admin-only analytics commands in the moderation chat: **`/report`** (daily),
+   **`/weekly`**, **`/top`** (see [Analytics & reporting](#11-analytics--reporting)).
 
-> Approve/Reject currently **log the decision and lock the message**. Wiring
-> approvals to an actual publish step is intentionally deferred to a later phase.
+> A manual **Approve** publishes the post to `TELEGRAM_CHANNEL_ID` and the
+> analytics layer records it. There is still **no** automatic / scheduled /
+> AI-initiated publishing — see [Moderation & approval flow](#9-moderation--approval-flow).
 
 ---
 
@@ -326,7 +338,113 @@ channel a *trusted* source: a person is always accountable for every post.
 
 ---
 
-## 10. Roadmap (foundation is built for this)
+## 11. Analytics & reporting
+
+Once a post is **manually approved and published**, the analytics subsystem
+starts measuring it. Analytics is **measurement only** — it never publishes and
+never influences moderation. Human approval remains the only path to publishing.
+
+### Architecture
+
+```
+Approve (manual) → publish → analytics-layer.trackPublished()
+                                   │
+        ┌──────────────────────────┼───────────────────────────┐
+        ▼                          ▼                           ▼
+  data/post-analytics.json   reporting-engine            feedback-engine
+  (normalized records +      (daily / weekly reports,    (labels post patterns:
+   engagement metrics)        /report /weekly /top)       successful / weak / …)
+```
+
+- **`analytics-layer`** — tracks every published post into
+  `data/post-analytics.json`: Telegram message id, publish time, category,
+  score, priority, source, detected **exchange mentions** and **GEO tags**,
+  plus an engagement metrics block. Exposes pure aggregations (by category /
+  exchange / priority / score range), top-post ranking, and historical
+  **snapshots** (`data/analytics-snapshots.json`) for a future dashboard.
+- **`reporting-engine`** — pure functions that turn analytics + the draft
+  lifecycle into a **daily** or **weekly** report: total published, top post,
+  top category, top exchange, average score, approval count, rejected count and
+  **publish success rate** (published ÷ approved).
+- **`feedback-engine`** — see [AI feedback](#ai-feedback-foundation).
+
+### Analytics schema (per published post)
+
+| Field | Meaning |
+|---|---|
+| `id` / `telegramMessageId` / `channelId` | Identity + where it was posted |
+| `title` / `link` / `source` | Content origin |
+| `category` / `priority` / `scoreTotal` | Editorial classification (from scoring) |
+| `exchangeMentions` / `geoTags` | Auto-detected (`bybit`, `okx`… / `KZ`, `Global`) |
+| `publishedAt` / `updatedAt` | Timestamps |
+| `metrics` | `{ views, forwards, reactions, edits, deletes, available, collectedAt }` |
+
+### Telegram metrics (reality check)
+
+The Telegram **Bot** API cannot read channel **views / forwards / reactions** —
+those are only exposed to the client/MTProto API. So metric collection
+**degrades gracefully**: unknown values stay `null` with `available: false`
+(an unmeasured post never looks "successful"), while edits/deletes — which a bot
+*can* observe — are tracked as counters. The collector is **injectable**, so a
+future MTProto / analytics-export integration can supply real engagement without
+changing any callers. `engagementScore = forwards·3 + reactions·2 + views·0.1`.
+
+### Reports (admin commands)
+
+In the moderation chat, an admin (`TELEGRAM_ADMIN_IDS`) can run:
+
+| Command | Output |
+|---|---|
+| `/report` | Daily report (last 24h) |
+| `/weekly` | Weekly report (last 7d) |
+| `/top` | Top posts leaderboard by engagement |
+
+Example daily report:
+
+```
+📊 Daily report
+🗓 2026-06-03 → 2026-06-04
+
+📰 Published: 3
+✅ Approved: 4 · ❌ Rejected: 1
+🚀 Publish success rate: 80%
+📊 Average score: 72/100
+🏷 Top category: Bonus
+🏦 Top exchange: bybit
+
+🏆 Top post (eng 765, score 86):
+   «Bybit Launchpool campaign for Kazakhstan users»
+```
+
+### AI feedback (foundation)
+
+`feedback-engine` is a **foundation only — NOT a self-learning model**, and it
+never changes scoring or publishing. It labels each published post so a future
+learning layer has clean signal:
+
+| Pattern | Rule |
+|---|---|
+| `successful` | high score **confirmed** by strong engagement (or a modest-score post that over-performed) |
+| `weak` | high score but near-zero engagement → the prediction missed |
+| `no_data` | no engagement collected yet — cannot judge |
+| `neutral` | within the expected range |
+
+It also stores per-**category** and per-**exchange** performance to
+`data/feedback.json`. Nothing here feeds back into the live scoring or the
+publish decision — that stays a deliberate, human, future step.
+
+### Tests
+
+The analytics subsystem has its own regression suites, run by the same CI gate:
+
+| Suite | Covers |
+|---|---|
+| [`tests/analytics-layer.test.ts`](tests/analytics-layer.test.ts) | persistence, exchange/GEO detection, engagement, aggregation, feedback classification |
+| [`tests/reporting-engine.test.ts`](tests/reporting-engine.test.ts) | report generation, time windows, success-rate math, top selection |
+
+---
+
+## 12. Roadmap (foundation is built for this)
 
 The architecture is deliberately modular to support, without rewrites:
 
@@ -335,7 +453,11 @@ The architecture is deliberately modular to support, without rewrites:
 - affiliate layer + bonus engine
 - AI scoring & ranking
 - scheduling
-- analytics
+- **analytics dashboard** — a UI over the normalized records + historical
+  snapshots already produced by `analytics-layer` (Phase 7 data structure)
+- **AI learning layer** — consuming `feedback-engine` patterns to suggest (never
+  auto-apply) scoring adjustments, with human review
+- real engagement metrics via MTProto / analytics export (collector is ready)
 - multilingual expansion
 
 Each future capability slots in as a new service or a config-driven extension

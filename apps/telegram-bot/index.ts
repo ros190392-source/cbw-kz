@@ -4,6 +4,8 @@ import { buildPipeline } from '../../src/pipeline';
 import { TelegramSender } from '../../services/telegram-sender';
 import { DraftStore } from '../../src/draft-store';
 import { approveDraft, rejectDraft } from '../../src/moderation-actions';
+import { AnalyticsStore } from '../../services/analytics-layer';
+import { buildReport, formatReport, formatTop } from '../../services/reporting-engine';
 import { logger } from '../../src/logger';
 
 /**
@@ -37,6 +39,7 @@ async function main() {
   const sender = new TelegramSender(bot, config.telegram.moderationChatId);
   const pipeline = buildPipeline(sender);
   const drafts = new DraftStore();
+  const analytics = new AnalyticsStore();
   let running = false;
 
   // Guard against rapid repeated Approve clicks while a publish is in flight.
@@ -76,7 +79,7 @@ async function main() {
         `This chat id: <code>${msg.chat.id}</code>`,
         '',
         'Set <code>TELEGRAM_MODERATION_CHAT_ID</code> to this id in your .env to receive drafts here.',
-        'Commands: /status, /run',
+        'Commands: /status, /run, /report, /weekly, /top',
       ].join('\n'),
       { parse_mode: 'HTML' },
     );
@@ -103,6 +106,42 @@ async function main() {
   bot.onText(/\/run/, (msg) => {
     bot.sendMessage(msg.chat.id, '🚀 Triggering a pipeline run…');
     void runOnce(msg.chat.id);
+  });
+
+  // Analytics commands — restricted to the moderation chat + admins, read-only.
+  const reportGate = (msg: TelegramBot.Message): boolean => {
+    if (!isModerationChat(msg.chat.id)) return false;
+    if (!isAdmin(msg.from?.id)) {
+      void bot.sendMessage(msg.chat.id, '⛔ Reports are restricted to admins.');
+      return false;
+    }
+    return true;
+  };
+
+  async function sendReport(chatId: number, period: 'daily' | 'weekly') {
+    const report = buildReport({ posts: analytics.all(), drafts: drafts.all(), period });
+    await bot.sendMessage(chatId, formatReport(report), {
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+    });
+  }
+
+  bot.onText(/\/report\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendReport(msg.chat.id, 'daily');
+  });
+
+  bot.onText(/\/weekly\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendReport(msg.chat.id, 'weekly');
+  });
+
+  bot.onText(/\/top\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void bot.sendMessage(msg.chat.id, formatTop(analytics.all()), {
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+    });
   });
 
   // Lock a moderation message: append a status stamp and remove the buttons.
@@ -166,6 +205,15 @@ async function main() {
         );
         await bot.answerCallbackQuery(query.id, { text: res.message });
         if (res.ok && chatId && messageId) {
+          // Analytics: track the published post (measurement only, never publishes).
+          const published = drafts.get(id);
+          if (published && res.channelMessageId != null) {
+            try {
+              analytics.trackPublished(published, res.channelMessageId, config.telegram.channelId);
+            } catch (err) {
+              logger.error('bot', `Analytics tracking failed (non-fatal): ${(err as Error).message}`);
+            }
+          }
           await lockMessage(
             chatId, messageId, original,
             `\n\n✅ PUBLISHED to channel (msg ${res.channelMessageId}) at ${utcStamp()}`,
