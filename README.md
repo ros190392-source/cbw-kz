@@ -41,7 +41,8 @@ cbw-kz/
 │   ├── feedback-engine/     # AI-feedback FOUNDATION: labels post patterns (no model)
 │   ├── exchange-registry/   # Exchange + bonus registry, trust verification
 │   ├── geo-engine/          # GEO compatibility (availability/P2P/KYC/fiat by country)
-│   └── affiliate-layer/     # Affiliate metadata + CTA helpers (NEVER auto-injected)
+│   ├── affiliate-layer/     # Affiliate metadata + CTA helpers (NEVER auto-injected)
+│   └── verification-engine/ # Evidence, confidence scoring, freshness, KZ snapshots
 ├── src/
 │   ├── pipeline.ts          # Orchestrator: fetch→dedupe→score→rewrite→send→log
 │   ├── draft-store.ts       # Draft lifecycle store (data/drafts.json)
@@ -56,7 +57,7 @@ cbw-kz/
 ├── tests/                   # Vitest suites (scoring, analytics, reporting, geo, registry)
 ├── data/                    # processed.json, drafts.json, post-analytics.json,
 │                            #   analytics-snapshots.json, feedback.json,
-│                            #   exchanges.json, bonuses.json
+│                            #   exchanges.json, bonuses.json, verifications.json
 └── logs/                    # pipeline.log, events.log (JSONL)
 ```
 
@@ -550,7 +551,100 @@ exchanges and which GEO-tagged posts perform best.
 
 ---
 
-## 13. Roadmap (foundation is built for this)
+## 13. Trust & verification layer (Kazakhstan)
+
+The monetization data starts out as static baselines. The **verification engine**
+(`services/verification-engine`) turns those into **evidence-backed claims** with
+a **0-100 confidence score** and a **freshness lifecycle**, so the system knows —
+and shows — how much each Kazakhstan claim can be trusted.
+
+> **Guiding rule: accuracy over speed, uncertainty over hallucination.** A claim
+> with weak, missing or stale evidence gets a LOW score and is flagged
+> **unreliable** rather than presented as fact. Fake verification, fake GEO
+> support and fake bonus claims are forbidden. Nothing here publishes.
+
+### Claims & evidence schema (Phase 1-2)
+
+A **claim** is one assertion about an exchange in a country (e.g. `bybit:KZ:p2p`
+= `true`). Each claim holds a list of **evidence**:
+
+| Evidence field | Meaning |
+|---|---|
+| `sourceUrl` | Where it was confirmed (required for `official_*` types) |
+| `type` | `official_docs` · `official_support` · `exchange_ui` · `user_report` · `manual_review` |
+| `note` | Free-text reviewer note |
+| `verifiedAt` / `expiresAt` | When gathered / when it should stop being trusted |
+| `status` | `verified` · `outdated` · `unverified` |
+| `reviewer` | Human handle (or `system` for baselines) |
+
+Every exchange is **seeded** with `unverified` baseline claims (`lastCheckedAt =
+null`) → they score ~5/100, so the system openly says "not really verified yet."
+
+### Confidence scoring (Phase 3)
+
+`computeConfidence(claim)` = strongest evidence (`authority × freshness ×
+status`) + diminishing bonus for extra confirmations + bonuses for human/official
+verification − penalty for conflicting evidence. Empty evidence → **0**.
+
+| Example | Score |
+|---|---|
+| official docs + recent manual review (verified) | **≈ 94** (high) |
+| single fresh, verified user report | **40** (low) |
+| old, unverified user report | **< 10** (very low) |
+| no evidence at all | **0** |
+
+Bands: `high ≥ 80` · `medium ≥ 50` · `low ≥ 25` · `very_low < 25`.
+
+### Freshness lifecycle (Phase 4)
+
+Based on age since last check vs a TTL (default 30 days):
+
+```
+fresh (≤½ TTL) → aging (≤TTL) → stale (≤2× TTL) → expired (older / never checked)
+```
+
+`stale` and `expired` mean **recheck required**. A claim is **reliable** only
+when `confidence ≥ 60` **and** freshness is `fresh`/`aging`.
+
+### GEO snapshots (Phase 5)
+
+`buildKzSnapshot(exchange, claims)` produces a per-exchange KZ snapshot — KYC,
+P2P, KZT, local banks (Kaspi/Halyk/Freedom), notes — plus an **aggregate
+confidence** and the **worst freshness** across its claims. The *values* come
+from the registry's best-known data; the verification engine supplies *how sure*
+we are. With no evidence the snapshot is confidence 0 / not reliable, and a
+single unverified claim (e.g. `fiat`) keeps the whole snapshot unreliable even if
+others are strong — uncertainty wins.
+
+### Moderation verification flow (Phase 6)
+
+Admin-gated, read-only commands in the moderation chat:
+
+| Command | Output |
+|---|---|
+| `/verify <slug>` | KZ snapshot + per-claim confidence & freshness (e.g. `/verify bybit`) |
+| `/confidence` | Aggregate KZ confidence per exchange, best first |
+| `/stale` | Claims needing a recheck (`stale`/`expired`) |
+| `/evidence <slug>` | The evidence behind each claim |
+
+A human raises confidence by attaching real evidence (`addEvidence`), which is
+**validated** (official claims must carry a source) and refreshes the timestamp.
+
+### Analytics integration (Phase 7)
+
+`verificationAnalytics(claims, bonuses)` reports total claims, average confidence,
+band distribution, stale claim ids, how many were recently checked, and which
+bonuses are outdated/unverified — feeding the trust health of the KZ matrix.
+
+### Tests
+
+| Suite | Covers |
+|---|---|
+| [`tests/verification-engine.test.ts`](tests/verification-engine.test.ts) | confidence scoring, freshness logic, evidence validation, stale detection, GEO snapshots, analytics, store persistence |
+
+---
+
+## 14. Roadmap (foundation is built for this)
 
 The architecture is deliberately modular to support, without rewrites:
 
@@ -558,6 +652,8 @@ The architecture is deliberately modular to support, without rewrites:
 - multiple Telegram channels
 - ✅ affiliate layer + bonus engine (EPIC 002 — built; affiliate auto-injection
   remains intentionally disabled, pending human-reviewed CTA placement)
+- ✅ trust & verification layer (EPIC 003 — evidence, confidence, freshness, KZ
+  snapshots; extend evidence sources + multi-country claims next)
 - AI scoring & ranking
 - scheduling
 - **analytics dashboard** — a UI over the normalized records + historical
