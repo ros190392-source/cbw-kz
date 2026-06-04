@@ -6,6 +6,14 @@ import { DraftStore } from '../../src/draft-store';
 import { approveDraft, rejectDraft } from '../../src/moderation-actions';
 import { AnalyticsStore } from '../../services/analytics-layer';
 import { buildReport, formatReport, formatTop } from '../../services/reporting-engine';
+import { ExchangeRegistry, BonusStore } from '../../services/exchange-registry';
+import {
+  formatExchanges,
+  formatBonuses,
+  formatLaunchpools,
+  formatGeo,
+} from '../../services/exchange-registry/format';
+import { GeoEngine } from '../../services/geo-engine';
 import { logger } from '../../src/logger';
 
 /**
@@ -40,6 +48,9 @@ async function main() {
   const pipeline = buildPipeline(sender);
   const drafts = new DraftStore();
   const analytics = new AnalyticsStore();
+  const exchanges = new ExchangeRegistry();
+  const bonuses = new BonusStore();
+  const geo = new GeoEngine(exchanges.all());
   let running = false;
 
   // Guard against rapid repeated Approve clicks while a publish is in flight.
@@ -79,7 +90,7 @@ async function main() {
         `This chat id: <code>${msg.chat.id}</code>`,
         '',
         'Set <code>TELEGRAM_MODERATION_CHAT_ID</code> to this id in your .env to receive drafts here.',
-        'Commands: /status, /run, /report, /weekly, /top',
+        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz',
       ].join('\n'),
       { parse_mode: 'HTML' },
     );
@@ -142,6 +153,32 @@ async function main() {
       parse_mode: 'HTML',
       disable_web_page_preview: true,
     });
+  });
+
+  // Monetization intelligence commands (EPIC 002). Read-only, admin-gated.
+  const sendHtml = (chatId: number, text: string) =>
+    bot.sendMessage(chatId, text, { parse_mode: 'HTML', disable_web_page_preview: true });
+
+  bot.onText(/\/exchanges\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatExchanges(exchanges.all()));
+  });
+
+  bot.onText(/\/bonuses\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatBonuses(bonuses.all(), exchanges.all()));
+  });
+
+  bot.onText(/\/launchpool\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatLaunchpools(bonuses.all(), exchanges.all()));
+  });
+
+  // /geo <country>, defaults to KZ. e.g. "/geo kz"
+  bot.onText(/\/geo(?:\s+(\w+))?/, (msg, match) => {
+    if (!reportGate(msg)) return;
+    const country = (match?.[1] ?? 'KZ').toUpperCase();
+    void sendHtml(msg.chat.id, formatGeo(geo.profilesFor(country), country));
   });
 
   // Lock a moderation message: append a status stamp and remove the buttons.

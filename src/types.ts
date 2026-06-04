@@ -236,3 +236,94 @@ export interface AnalyticsSnapshot {
   byPriority: GroupStat[];
   byScoreRange: GroupStat[];
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// MONETIZATION INTELLIGENCE (EPIC 002 — affiliate / bonus engine)
+//
+// This layer models WHICH exchanges work where, WHAT bonuses exist, and HOW
+// trustworthy that information is. It is intelligence + structure only: it never
+// injects affiliate links into content and never publishes. Human moderation
+// stays mandatory. Accuracy + GEO correctness are the whole point.
+// ───────────────────────────────────────────────────────────────────────────
+
+export type TrustLevel = 'high' | 'medium' | 'low';
+
+/** KYC depth required to trade. */
+export type KycLevel = 'none' | 'basic' | 'full';
+
+/** Verification state of a bonus/campaign claim. */
+export type VerificationStatus = 'verified' | 'outdated' | 'unverified';
+
+export type BonusType =
+  | 'signup'
+  | 'deposit'
+  | 'trading'
+  | 'launchpool'
+  | 'launchpad'
+  | 'campaign'
+  | 'competition';
+
+/** Kazakhstan-specific availability (the initial GEO focus). */
+export interface KzAvailability {
+  available: boolean;
+  p2p: boolean;
+  kyc: KycLevel;
+  /** Supported KZ fiat rails, e.g. KZT, Kaspi, Halyk, Freedom, local-cards. */
+  fiat: string[];
+  notes: string;
+}
+
+/** One exchange in the registry. */
+export interface ExchangeRecord {
+  name: string;
+  slug: string;
+  officialUrl: string;
+  /** Tracking-ready affiliate URL. Defaults to officialUrl until a code lands. */
+  affiliateUrl: string;
+  /** ISO country codes the exchange serves; `*` means "global default allow". */
+  supportedGeos: string[];
+  /** Hard GEO blocks (take priority over supportedGeos). */
+  restrictedGeos: string[];
+  kyc: KycLevel;
+  p2p: boolean;
+  /** Global fiat currencies / rails supported. */
+  fiat: string[];
+  kazakhstan: KzAvailability;
+  trustLevel: TrustLevel;
+  notes: string;
+  /** When a human last reviewed this record (null = needs review). */
+  lastReviewedAt: string | null;
+}
+
+/** Provenance + freshness of a bonus claim. */
+export interface VerificationInfo {
+  status: VerificationStatus;
+  /** Where the claim was verified (URL / human note). */
+  source: string;
+  lastCheckedAt: string | null;
+}
+
+/** A tracked bonus / campaign / launchpool. */
+export interface BonusRecord {
+  id: string;
+  exchangeSlug: string;
+  type: BonusType;
+  title: string;
+  description: string;
+  /** Human-readable value, e.g. "Up to $5,000" (null if not quantified). */
+  value: string | null;
+  /** GEOs the bonus applies to (`*` = global). */
+  geos: string[];
+  startDate: string | null;
+  expiryDate: string | null;
+  sourceUrl: string;
+  verification: VerificationInfo;
+}
+
+/** Affiliate metadata — tracking-ready, never auto-injected into content. */
+export interface AffiliateMeta {
+  exchangeSlug: string;
+  affiliateUrl: string;
+  refCode: string | null;
+  campaign: string | null;
+}

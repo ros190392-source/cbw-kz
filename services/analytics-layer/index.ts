@@ -168,6 +168,11 @@ export function aggregateByExchange(records: PostAnalyticsRecord[]): GroupStat[]
   return groupBy(records, (r) => (r.exchangeMentions.length ? r.exchangeMentions : ['none']));
 }
 
+/** Performance grouped by GEO tag (EPIC 002 · Phase 7). */
+export function aggregateByGeo(records: PostAnalyticsRecord[]): GroupStat[] {
+  return groupBy(records, (r) => (r.geoTags.length ? r.geoTags : ['Global']));
+}
+
 export function aggregateByPriority(records: PostAnalyticsRecord[]): GroupStat[] {
   return groupBy(records, (r) => [r.priority ?? 'UNKNOWN']);
 }
