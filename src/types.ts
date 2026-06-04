@@ -115,3 +115,124 @@ export interface ProcessedRecord {
   sent: boolean;
   processedAt: string;
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// ANALYTICS FOUNDATION (EPIC 001)
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Engagement metrics for a published channel post. Telegram does not always
+ * expose engagement to bots (views/forwards/reactions depend on channel type
+ * and API surface), so each numeric field is nullable and `available` records
+ * whether real engagement data was ever collected. Counters that the bot can
+ * always observe locally (edits / deletes) are plain numbers.
+ */
+export interface TelegramMetrics {
+  views: number | null;
+  forwards: number | null;
+  reactions: number | null;
+  edits: number;
+  deletes: number;
+  /** True once any real engagement metric (views/forwards/reactions) was set. */
+  available: boolean;
+  collectedAt: string | null;
+}
+
+/**
+ * One published post, normalized for analytics. This is the durable record the
+ * dashboard, reports and AI-feedback layers all read from.
+ */
+export interface PostAnalyticsRecord {
+  /** Matches the originating NewsItem / DraftRecord id. */
+  id: string;
+  telegramMessageId: number;
+  channelId: string;
+  title: string;
+  link: string;
+  source: string;
+  category: string | null;
+  priority: Priority | null;
+  scoreTotal: number | null;
+  /** Exchanges mentioned in the post (lowercased canonical names). */
+  exchangeMentions: string[];
+  /** GEO tags (e.g. "KZ", "Global"). */
+  geoTags: string[];
+  publishedAt: string;
+  metrics: TelegramMetrics;
+  updatedAt: string;
+}
+
+/** Aggregated performance for one group (a category, exchange, priority, …). */
+export interface GroupStat {
+  key: string;
+  posts: number;
+  avgScore: number;
+  totalViews: number;
+  totalForwards: number;
+  totalReactions: number;
+  totalEngagement: number;
+  avgEngagement: number;
+}
+
+export type ReportPeriod = 'daily' | 'weekly';
+
+/** A compact reference to a post, used inside reports. */
+export interface ReportPostRef {
+  id: string;
+  title: string;
+  category: string | null;
+  scoreTotal: number | null;
+  engagement: number;
+  telegramMessageId: number;
+}
+
+/** A generated daily / weekly report. */
+export interface AnalyticsReport {
+  period: ReportPeriod;
+  generatedAt: string;
+  rangeStart: string;
+  rangeEnd: string;
+  totalPublished: number;
+  approvalCount: number;
+  rejectedCount: number;
+  /** published / approved, 0..1 (1 when there were no approvals). */
+  publishSuccessRate: number;
+  averageScore: number;
+  topPost: ReportPostRef | null;
+  topCategory: string | null;
+  topExchange: string | null;
+}
+
+/** AI-feedback classification of one published post (foundation only). */
+export type FeedbackClass = 'successful' | 'weak' | 'neutral' | 'no_data';
+
+export interface PatternFeedback {
+  id: string;
+  title: string;
+  category: string | null;
+  priority: Priority | null;
+  scoreTotal: number | null;
+  engagement: number;
+  classification: FeedbackClass;
+  reason: string;
+}
+
+/** Foundation summary for future AI learning — NOT a self-learning model. */
+export interface FeedbackSummary {
+  generatedAt: string;
+  patterns: PatternFeedback[];
+  categoryPerformance: GroupStat[];
+  exchangePerformance: GroupStat[];
+  successfulCount: number;
+  weakCount: number;
+}
+
+/** Historical snapshot of the analytics state, for the future dashboard. */
+export interface AnalyticsSnapshot {
+  takenAt: string;
+  totalPublished: number;
+  byCategory: GroupStat[];
+  byExchange: GroupStat[];
+  byPriority: GroupStat[];
+  byScoreRange: GroupStat[];
+}
