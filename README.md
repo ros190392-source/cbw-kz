@@ -272,6 +272,9 @@ Kazakhstan/bonus news, or lets meme-coin hype through fails CI before it can be
 merged — the editorial quality of the channel is protected by default, not by
 memory.
 
+To make the green CI check **mandatory** for merging into `main`, follow
+[docs/branch-protection.md](docs/branch-protection.md).
+
 ---
 
 ## 9. Moderation & approval flow
