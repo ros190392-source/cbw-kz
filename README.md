@@ -48,7 +48,8 @@ cbw-kz/
 │   ├── research-engine/     # Classifies news findings + snapshot/formatters
 │   ├── trend-engine/        # Momentum, trending/undercovered/emerging topics
 │   ├── discovery-engine/    # Proposes registry candidates, rejects scams (no writes)
-│   └── optimization-engine/ # Meta-brain: self-improvement suggestions (recommend-only)
+│   ├── optimization-engine/ # Meta-brain: self-improvement suggestions (recommend-only)
+│   └── editorial-workflow/  # Human-gated queue: idea→…→published (state only, no publish)
 ├── src/
 │   ├── pipeline.ts          # Orchestrator: fetch→dedupe→score→rewrite→send→log
 │   ├── draft-store.ts       # Draft lifecycle store (data/drafts.json)
@@ -931,7 +932,72 @@ Admin-gated, **read-only**:
 
 ---
 
-## 18. Roadmap (foundation is built for this)
+## 18. Editorial workflow / queue
+
+The editorial workflow (`services/editorial-workflow`) is the **connective
+tissue**: it pulls planner topics, research findings, verification warnings,
+optimization suggestions and manual admin ideas into a single human-gated queue
+and tracks each through its lifecycle.
+
+> **Human-gate philosophy.** The workflow only **tracks state**. It never
+> publishes, never auto-approves, and imports no publisher. Every advancing
+> transition requires an explicit human reviewer (`by`) — there are no
+> autonomous moves — and any item carrying a verification requirement is
+> **blocked** from `approved`/`scheduled`/`published` until a human clears the
+> gate. Publishing itself remains the separate manual Approve → channel flow
+> (§9); this layer touches none of it.
+
+### Queue lifecycle
+
+```
+idea → draft_requested → drafted → in_review → approved → scheduled → published
+  └──────────────── (any active status) ───────────────→ rejected → (reopen) idea
+```
+
+`published` is terminal and is only a **record** a human sets after the manual
+publish — reaching it from here requires going through `scheduled` and clearing
+any verification gate. Each transition is validated against an allowed-moves map
+and appended to the item's `history`.
+
+### Queue item
+
+| Field | Meaning |
+|---|---|
+| `source` | `planner` · `research` · `verification` · `optimization` · `manual` |
+| `reason` / `priority` | Why it's queued + 0-100 ranking |
+| `status` | Position in the lifecycle |
+| `requiredVerification` / `verificationCleared` | The gate (e.g. `bybit:KZ`) + whether a human cleared it |
+| `geo` / `locale` / `exchange` / `notes` | Targeting + context |
+| `history` / `decidedBy` | Audit trail of who moved it when |
+
+### Ingestion + de-duplication
+
+Builders convert each input into queue **ideas** (planner topics, research
+findings — always gated, optimization `verification_refresh` → gated verification
+items, plus manual ideas). Ingestion is **idempotent**: duplicates are rejected
+by id *and* by normalized title, so re-seeding the queue every command is safe
+and never resurrects rejected items.
+
+### Commands
+
+Admin-gated:
+
+| Command | Output |
+|---|---|
+| `/queue` | Active queue, prioritized, with gate status |
+| `/queue_add <text>` | Add a manual idea (dedup-checked) |
+| `/review` | Review-ready summary + items blocked by verification |
+| `/next` | The single highest-priority actionable item |
+
+### Tests
+
+| Suite | Covers |
+|---|---|
+| [`tests/editorial-workflow.test.ts`](tests/editorial-workflow.test.ts) | queue creation, duplicate prevention, status transitions, prioritization, verification-gated items, no-auto-publish/autonomy guarantee |
+
+---
+
+## 19. Roadmap (foundation is built for this)
 
 The architecture is deliberately modular to support, without rewrites:
 
@@ -951,7 +1017,10 @@ The architecture is deliberately modular to support, without rewrites:
 - ✅ AI learning / optimization meta-brain (EPIC 007 — scoring/source/topic/locale
   tuning suggestions, stale warnings, pattern learning; recommend-only, nothing
   auto-applied — a human reviews and applies each suggestion)
-- scheduling (planner output is ready to feed a human-reviewed scheduler)
+- ✅ editorial workflow / queue (EPIC 008 — human-gated lifecycle connecting
+  planner/research/verification/optimization/manual ideas; state-only, verification
+  gates, no auto-publish/approve)
+- scheduling (queue feeds a human-reviewed scheduler; still no auto-fire)
 - **analytics dashboard** — a UI over the normalized records + historical
   snapshots already produced by `analytics-layer` (Phase 7 data structure)
 - **AI learning layer** — consuming `feedback-engine` patterns to suggest (never

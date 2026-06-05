@@ -39,6 +39,20 @@ import {
   formatSuggestions,
   formatLearn,
 } from '../../services/optimization-engine/format';
+import {
+  WorkflowStore,
+  fromPlannerTopics,
+  fromResearchFindings,
+  fromOptimizationSuggestions,
+  manualIdea,
+  reviewSummary,
+} from '../../services/editorial-workflow';
+import {
+  formatQueue,
+  formatReview,
+  formatNext,
+  formatAdded,
+} from '../../services/editorial-workflow/format';
 import { logger } from '../../src/logger';
 
 /**
@@ -78,6 +92,7 @@ async function main() {
   const geo = new GeoEngine(exchanges.all());
   const verifications = new VerificationStore(exchanges.all());
   const optimization = new OptimizationStore();
+  const workflow = new WorkflowStore();
   const researchParser = new RssParser(SOURCES);
   let researchCache: { snap: ResearchSnapshot; at: number } | null = null;
   let running = false;
@@ -132,7 +147,7 @@ async function main() {
         `This chat id: <code>${msg.chat.id}</code>`,
         '',
         'Set <code>TELEGRAM_MODERATION_CHAT_ID</code> to this id in your .env to receive drafts here.',
-        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence, /locales, /plan, /weekplan, /backlog, /research, /trends, /discoveries, /signals, /insights, /suggestions, /learn',
+        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence, /locales, /plan, /weekplan, /backlog, /research, /trends, /discoveries, /signals, /insights, /suggestions, /learn, /queue, /queue_add, /review, /next',
       ].join('\n'),
       { parse_mode: 'HTML' },
     );
@@ -340,6 +355,50 @@ async function main() {
   bot.onText(/\/learn\b/, (msg) => {
     if (!reportGate(msg)) return;
     void sendHtml(msg.chat.id, formatLearn(optimizationSnapshot()));
+  });
+
+  // Editorial workflow / queue commands (EPIC 008). Read + manual-add only.
+  // Idempotently seeds the queue from planner + optimization (+ cached research).
+  // It NEVER publishes or auto-advances; status changes are explicit human actions.
+  function seedWorkflow(): void {
+    const items = [
+      ...fromPlannerTopics(backlog(plannerInputs())),
+      ...fromOptimizationSuggestions(
+        buildOptimization({ posts: analytics.all(), claims: verifications.all() }).suggestions,
+      ),
+    ];
+    if (researchCache) items.push(...fromResearchFindings(researchCache.snap.findings.slice(0, 10)));
+    workflow.seed(items);
+  }
+
+  bot.onText(/\/queue\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    seedWorkflow();
+    void sendHtml(msg.chat.id, formatQueue(workflow.all()));
+  });
+
+  // /queue_add <text>
+  bot.onText(/\/queue_add(?:\s+([\s\S]+))?/, (msg, match) => {
+    if (!reportGate(msg)) return;
+    const text = (match?.[1] ?? '').trim();
+    if (!text) {
+      void sendHtml(msg.chat.id, 'Usage: <code>/queue_add Your topic idea</code>');
+      return;
+    }
+    const by = msg.from?.username ?? String(msg.from?.id ?? 'admin');
+    void sendHtml(msg.chat.id, formatAdded(workflow.add(manualIdea(text, { by }))));
+  });
+
+  bot.onText(/\/review\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    seedWorkflow();
+    void sendHtml(msg.chat.id, formatReview(reviewSummary(workflow.all())));
+  });
+
+  bot.onText(/\/next\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    seedWorkflow();
+    void sendHtml(msg.chat.id, formatNext(workflow.all()));
   });
 
   // Lock a moderation message: append a status stamp and remove the buttons.

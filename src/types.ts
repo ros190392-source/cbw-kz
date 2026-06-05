@@ -700,3 +700,65 @@ export interface OptimizationSnapshot {
   };
   notes: string[];
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// EDITORIAL WORKFLOW / QUEUE (EPIC 008)
+//
+// A human-gated queue that connects planner topics, research findings,
+// verification warnings, optimization suggestions and manual ideas into one
+// lifecycle. The workflow only TRACKS state — it never publishes, never
+// approves on its own, and items that require verification cannot advance to
+// approved/scheduled/published until a human clears them. Publishing itself
+// stays the existing manual Approve → channel flow; this layer touches no
+// publisher.
+// ───────────────────────────────────────────────────────────────────────────
+
+export type WorkflowStatus =
+  | 'idea'
+  | 'draft_requested'
+  | 'drafted'
+  | 'in_review'
+  | 'approved'
+  | 'rejected'
+  | 'scheduled'
+  | 'published';
+
+export type QueueSource = 'planner' | 'research' | 'verification' | 'optimization' | 'manual';
+
+export interface QueueHistoryEntry {
+  status: WorkflowStatus;
+  at: string;
+  by: string | null;
+}
+
+/** One item in the editorial workflow queue. */
+export interface QueueItem {
+  id: string;
+  title: string;
+  source: QueueSource;
+  reason: string;
+  priority: number; // 0-100
+  status: WorkflowStatus;
+  /** A verification target (claim id / "exchange:GEO") that must clear first. */
+  requiredVerification: string | null;
+  /** Whether the required verification has been cleared by a human. */
+  verificationCleared: boolean;
+  geo: string | null;
+  locale: string | null;
+  exchange: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+  decidedBy: string | null;
+  history: QueueHistoryEntry[];
+}
+
+export interface QueueReviewSummary {
+  generatedAt: string;
+  byStatus: Record<string, number>;
+  /** Items awaiting a review decision (in_review / drafted). */
+  reviewReady: QueueItem[];
+  /** Items blocked by an uncleared verification gate. */
+  blockedByVerification: QueueItem[];
+  notes: string[];
+}
