@@ -89,7 +89,20 @@ import {
   formatMissingEvidence,
   formatManualTrust,
 } from '../../services/evidence-system/format';
-import { DraftType } from '../../src/types';
+import {
+  buildGeoManual,
+  buildGuideMatrix,
+  findStep,
+  testerTasksForManuals,
+  GUIDE_GEOS,
+} from '../../services/manual-builder';
+import {
+  formatManual,
+  formatManualStep,
+  formatGuideStatus,
+  formatTesterTasks,
+} from '../../services/manual-builder/format';
+import { DraftType, GuideTopic } from '../../src/types';
 import { logger } from '../../src/logger';
 import http from 'http';
 
@@ -587,6 +600,55 @@ async function main() {
   bot.onText(/\/manual_trust\b/, (msg) => {
     if (!reportGate(msg)) return;
     void sendHtml(msg.chat.id, formatManualTrust(seedManuals()));
+  });
+
+  // Manual builder / GEO guide engine (EPIC 014). Read-only previews.
+  const VALID_TOPICS: GuideTopic[] = ['p2p', 'kyc', 'deposit', 'withdrawal', 'launchpool', 'bonus', 'account_security'];
+  const asTopic = (t?: string): GuideTopic | null =>
+    VALID_TOPICS.includes((t ?? '').toLowerCase() as GuideTopic) ? ((t as string).toLowerCase() as GuideTopic) : null;
+  const asGeo = (g?: string): string => {
+    const up = (g ?? '').toUpperCase();
+    return GUIDE_GEOS.includes(up) ? up : 'KZ';
+  };
+
+  // /manual <exchange> <topic> [geo]
+  bot.onText(/\/manual(?:@\w+)?\s+(\S+)\s+(\S+)(?:\s+(\S+))?\s*$/, (msg, match) => {
+    if (!reportGate(msg)) return;
+    const ex = exchanges.get((match?.[1] ?? '').toLowerCase());
+    const topic = asTopic(match?.[2]);
+    if (!ex || !topic) {
+      void sendHtml(msg.chat.id, 'Usage: <code>/manual bybit p2p KZ</code>\nTopics: p2p, kyc, deposit, withdrawal, launchpool, bonus, account_security');
+      return;
+    }
+    void sendHtml(msg.chat.id, formatManual(buildGeoManual(ex, topic, asGeo(match?.[3]), { screenshots: screenshots.all() })));
+  });
+
+  // /manual_step <exchange> <topic> <stepId> [geo]
+  bot.onText(/\/manual_step(?:@\w+)?\s+(\S+)\s+(\S+)\s+(\S+)(?:\s+(\S+))?\s*$/, (msg, match) => {
+    if (!reportGate(msg)) return;
+    const ex = exchanges.get((match?.[1] ?? '').toLowerCase());
+    const topic = asTopic(match?.[2]);
+    if (!ex || !topic) {
+      void sendHtml(msg.chat.id, 'Usage: <code>/manual_step bybit p2p select-fiat KZ</code>');
+      return;
+    }
+    const manual = buildGeoManual(ex, topic, asGeo(match?.[4]), { screenshots: screenshots.all() });
+    void sendHtml(msg.chat.id, formatManualStep(manual, findStep(manual, (match?.[3] ?? '').toLowerCase())));
+  });
+
+  bot.onText(/\/guide_status\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    // Bounded matrix: top exchanges × all topics for KZ (primary market).
+    const top = exchanges.all().slice(0, 3);
+    const manuals = buildGuideMatrix(top, { geos: ['KZ'], screenshots: screenshots.all() });
+    void sendHtml(msg.chat.id, formatGuideStatus(manuals));
+  });
+
+  bot.onText(/\/tester_tasks\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    const top = exchanges.all().slice(0, 3);
+    const manuals = buildGuideMatrix(top, { geos: GUIDE_GEOS, screenshots: screenshots.all() });
+    void sendHtml(msg.chat.id, formatTesterTasks(testerTasksForManuals(manuals)));
   });
 
   bot.onText(/\/runtime_status\b/, (msg) => {
