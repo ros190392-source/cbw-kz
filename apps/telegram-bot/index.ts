@@ -75,6 +75,12 @@ import {
 } from '../../services/runtime-health/format';
 import { AdminAlerts } from '../../services/admin-alerts';
 import { BackupEngine } from '../../services/backup-engine';
+import { buildSnapshotFromGit, evaluatePr } from '../../services/merge-guardian';
+import {
+  formatGuardian,
+  formatPrRisk,
+  formatSafeToMerge,
+} from '../../services/merge-guardian/format';
 import { DraftType } from '../../src/types';
 import { logger } from '../../src/logger';
 import http from 'http';
@@ -185,7 +191,7 @@ async function main() {
         `This chat id: <code>${msg.chat.id}</code>`,
         '',
         'Set <code>TELEGRAM_MODERATION_CHAT_ID</code> to this id in your .env to receive drafts here.',
-        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence, /locales, /plan, /weekplan, /backlog, /research, /trends, /discoveries, /signals, /insights, /suggestions, /learn, /queue, /queue_add, /review, /next, /draft, /outline, /seo, /localized, /operator, /today, /blocked, /health, /health_runtime, /backup, /runtime_status',
+        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence, /locales, /plan, /weekplan, /backlog, /research, /trends, /discoveries, /signals, /insights, /suggestions, /learn, /queue, /queue_add, /review, /next, /draft, /outline, /seo, /localized, /operator, /today, /blocked, /health, /health_runtime, /backup, /runtime_status, /merge_guardian, /pr_risk, /safe_to_merge',
       ].join('\n'),
       { parse_mode: 'HTML' },
     );
@@ -525,6 +531,33 @@ async function main() {
     const result = backupEngine.createBackup();
     const pruned = result.ok ? backupEngine.applyRetention() : [];
     void sendHtml(msg.chat.id, formatBackupResult(result, pruned));
+  });
+
+  // Merge Guardian commands (EPIC 012). Evaluation/reporting ONLY — no merging.
+  // Usage: /merge_guardian <branch> [base]
+  const guardianReport = (arg?: string) => {
+    const [branch, base] = (arg ?? '').trim().split(/\s+/);
+    if (!branch) return null;
+    return evaluatePr(buildSnapshotFromGit(branch, base || 'main'));
+  };
+
+  bot.onText(/\/merge_guardian(?:\s+([\s\S]+))?/, (msg, match) => {
+    if (!reportGate(msg)) return;
+    const report = guardianReport(match?.[1]);
+    if (!report) { void sendHtml(msg.chat.id, 'Usage: <code>/merge_guardian &lt;branch&gt; [base]</code>'); return; }
+    void sendHtml(msg.chat.id, formatGuardian(report));
+  });
+  bot.onText(/\/pr_risk(?:\s+([\s\S]+))?/, (msg, match) => {
+    if (!reportGate(msg)) return;
+    const report = guardianReport(match?.[1]);
+    if (!report) { void sendHtml(msg.chat.id, 'Usage: <code>/pr_risk &lt;branch&gt; [base]</code>'); return; }
+    void sendHtml(msg.chat.id, formatPrRisk(report));
+  });
+  bot.onText(/\/safe_to_merge(?:\s+([\s\S]+))?/, (msg, match) => {
+    if (!reportGate(msg)) return;
+    const report = guardianReport(match?.[1]);
+    if (!report) { void sendHtml(msg.chat.id, 'Usage: <code>/safe_to_merge &lt;branch&gt; [base]</code>'); return; }
+    void sendHtml(msg.chat.id, formatSafeToMerge(report));
   });
 
   bot.onText(/\/runtime_status\b/, (msg) => {

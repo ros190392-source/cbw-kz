@@ -54,7 +54,8 @@ cbw-kz/
 │   ├── operator-engine/     # Command center: health, next actions, blocked (recommend-only)
 │   ├── runtime-health/      # Production health checks + report formatters
 │   ├── admin-alerts/        # Notification-only operational alerts (no actions)
-│   └── backup-engine/       # Timestamped data backups + retention policy
+│   ├── backup-engine/       # Timestamped data backups + retention policy
+│   └── merge-guardian/      # PR safety verdicts (evaluation-only, no auto-merge)
 ├── src/
 │   ├── pipeline.ts          # Orchestrator: fetch→dedupe→score→rewrite→send→log
 │   ├── draft-store.ts       # Draft lifecycle store (data/drafts.json)
@@ -1204,7 +1205,59 @@ needed. `backups/` is git-ignored.
 
 ---
 
-## 22. Roadmap (foundation is built for this)
+## 22. Merge Guardian / semi-autonomous ops
+
+The Merge Guardian (`services/merge-guardian`) evaluates a PR against a safety
+policy and classifies it `SAFE_TO_AUTO_MERGE` / `REQUIRES_HUMAN_REVIEW` /
+`BLOCKED`, with a 0-100 risk score, reasons, required human actions, blocked
+reasons and a checklist.
+
+> **Why auto-merge is NOT enabled.** This EPIC is **evaluation + reporting
+> only**. The guardian never merges, never pushes, never approves, and changes
+> no GitHub settings. `SAFE_TO_AUTO_MERGE` means "policy-clean", not "merged" —
+> a human still merges every PR. It exists to *build a track record* of correct
+> verdicts before semi-autonomous merging could ever be considered.
+
+### Policy
+
+| Verdict | When |
+|---|---|
+| **BLOCKED** | committed `.env`, secrets/tokens in diff, auto-publish/auto-approve code, a removed publish-safety marker, failing CI, or merge conflicts |
+| **REQUIRES_HUMAN_REVIEW** | protected paths touched (publish/moderation flow, scoring, verification formulas, content-generation, affiliate/registry, bot commands, runtime/deploy config, CI), code without tests/README, large diff, stale/old branch, or unknown CI |
+| **SAFE_TO_AUTO_MERGE** | docs-only, tests-only, or an isolated new service + tests + README — CI passing and no protected path touched |
+
+The risk score weights review findings, diff size, staleness and unknown CI;
+blocked PRs are pinned ≥ 85, safe PRs ≤ 15.
+
+### Commands (advisory only)
+
+| Command | Output |
+|---|---|
+| `/merge_guardian <branch> [base]` | Full verdict + reasons + checklist |
+| `/pr_risk <branch> [base]` | Risk score + reasons |
+| `/safe_to_merge <branch> [base]` | Verdict headline |
+
+Also available as a CLI: `npm run guardian -- <branch> [base] [--ci passing]`.
+
+### Future semi-auto-merge roadmap (not enabled)
+
+1. **Now:** advisory verdicts only (this EPIC).
+2. **Next:** wire real CI status (GitHub checks API) into the snapshot.
+3. **Later:** allow auto-merge *only* for `SAFE_TO_AUTO_MERGE` + green CI +
+   docs/tests-only, behind a branch-protection rule and an explicit opt-in flag,
+   with a human override always available.
+4. Protected paths (publish/moderation/scoring/verification) remain **never**
+   auto-mergeable — they always require a human.
+
+### Tests
+
+| Suite | Covers |
+|---|---|
+| [`tests/merge-guardian.test.ts`](tests/merge-guardian.test.ts) | docs/tests/service-safe, .env + secrets + auto-publish + safety-removal + CI-fail + conflicts blocked, publish/scoring/bot/stale/no-tests/unknown-CI review, checklist |
+
+---
+
+## 23. Roadmap (foundation is built for this)
 
 The architecture is deliberately modular to support, without rewrites:
 
@@ -1233,6 +1286,8 @@ The architecture is deliberately modular to support, without rewrites:
   actions, health, blocked items; recommend-only, human is final operator)
 - ✅ deployment / runtime layer (EPIC 011 — PM2, health checks, notification-only
   alerts, backups + retention; no moderation/publish logic changed)
+- ✅ merge guardian / semi-autonomous ops foundation (EPIC 012 — PR safety
+  verdicts + risk scoring; evaluation-only, real auto-merge intentionally disabled)
 - scheduling (queue feeds a human-reviewed scheduler; still no auto-fire)
 - **analytics dashboard** — a UI over the normalized records + historical
   snapshots already produced by `analytics-layer` (Phase 7 data structure)
