@@ -102,6 +102,13 @@ import {
   formatGuideStatus,
   formatTesterTasks,
 } from '../../services/manual-builder/format';
+import { TesterRegistry, SubmissionStore, assignTasks } from '../../services/local-tester';
+import {
+  formatTesters,
+  formatAssignments,
+  formatSubmissionReview,
+  formatTesterScore,
+} from '../../services/local-tester/format';
 import { DraftType, GuideTopic } from '../../src/types';
 import { logger } from '../../src/logger';
 import http from 'http';
@@ -156,6 +163,9 @@ async function main() {
   );
   const backupEngine = new BackupEngine();
   const screenshots = new ScreenshotRegistry();
+  const testers = new TesterRegistry();
+  const submissions = new SubmissionStore();
+  testers.seed(); // honest example testers on first run (idempotent)
   let lastPipelineRun: string | null = null;
   let lastError: string | null = null;
 
@@ -649,6 +659,33 @@ async function main() {
     const top = exchanges.all().slice(0, 3);
     const manuals = buildGuideMatrix(top, { geos: GUIDE_GEOS, screenshots: screenshots.all() });
     void sendHtml(msg.chat.id, formatTesterTasks(testerTasksForManuals(manuals)));
+  });
+
+  // Local tester program / evidence-review network (EPIC 015). Read-only views.
+  bot.onText(/\/testers\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatTesters(testers.all()));
+  });
+  // GEO/specialty-routed assignment of the missing-evidence (tester-task) queue.
+  bot.onText(/\/assignments\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    const top = exchanges.all().slice(0, 3);
+    const manuals = buildGuideMatrix(top, { geos: GUIDE_GEOS, screenshots: screenshots.all() });
+    void sendHtml(msg.chat.id, formatAssignments(assignTasks(testerTasksForManuals(manuals), testers.all())));
+  });
+  bot.onText(/\/submission_review\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatSubmissionReview(submissions.all()));
+  });
+  // /tester_score <testerId>
+  bot.onText(/\/tester_score(?:@\w+)?(?:\s+(\S+))?\s*$/, (msg, match) => {
+    if (!reportGate(msg)) return;
+    const id = (match?.[1] ?? '').trim();
+    if (!id) {
+      void sendHtml(msg.chat.id, formatTesters(testers.all()));
+      return;
+    }
+    void sendHtml(msg.chat.id, formatTesterScore(testers.get(id)));
   });
 
   bot.onText(/\/runtime_status\b/, (msg) => {
