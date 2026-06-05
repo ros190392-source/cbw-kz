@@ -49,7 +49,8 @@ cbw-kz/
 │   ├── trend-engine/        # Momentum, trending/undercovered/emerging topics
 │   ├── discovery-engine/    # Proposes registry candidates, rejects scams (no writes)
 │   ├── optimization-engine/ # Meta-brain: self-improvement suggestions (recommend-only)
-│   └── editorial-workflow/  # Human-gated queue: idea→…→published (state only, no publish)
+│   ├── editorial-workflow/  # Human-gated queue: idea→…→published (state only, no publish)
+│   └── content-engine/      # Verification-aware draft generation (machine-gen, review-required)
 ├── src/
 │   ├── pipeline.ts          # Orchestrator: fetch→dedupe→score→rewrite→send→log
 │   ├── draft-store.ts       # Draft lifecycle store (data/drafts.json)
@@ -997,7 +998,76 @@ Admin-gated:
 
 ---
 
-## 19. Roadmap (foundation is built for this)
+## 19. Content generation engine
+
+The content engine (`services/content-engine`) turns a topic / finding / exchange
+into a **structured, verification-aware draft** — Telegram posts, article
+outlines, SEO snippets, warning posts and educational posts — for a human to
+review and (optionally) publish via the normal flow.
+
+> **Human-review guarantees.** Every draft is `machineGenerated: true` +
+> `humanReviewRequired: true`. The engine **never publishes, posts to Telegram,
+> or auto-approves**. It implies **no certainty** beyond cited evidence, flags
+> unverified/low-confidence/stale claims, discloses GEO restrictions explicitly,
+> never fabricates a verified bonus, and keeps the CTA a `{{CTA}}` placeholder
+> (no real affiliate link is ever injected).
+
+### Draft types
+
+`telegram_post` · `article_outline` · `seo_snippet` · `warning_post` ·
+`educational_post`. Tone is chosen automatically (`neutral` / `educational` /
+`cautionary` / `promotional_safe`) — there is no hype vocabulary.
+
+### Draft schema (key fields)
+
+| Field | Meaning |
+|---|---|
+| `type` / `tone` / `title` / `body` | The generated draft |
+| `citations` | `VerificationCitation[]` — target, confidence, freshness, reliable |
+| `warnings` | Low-confidence / stale / unverified-bonus / GEO-restriction flags |
+| `seo` | `SeoBlock` for SEO/outline drafts (title, meta ≤160, keyword clusters, FAQ, CTA) |
+| `ctaPlaceholder` | Always `{{CTA}}` — never a real link |
+| `machineGenerated` / `humanReviewRequired` | Always `true` |
+| `confidenceNote` | Explicit "no certainty beyond cited evidence" note |
+
+### Verification-aware writing
+
+Claims relevant to the draft's exchange + GEO are cited with their live
+confidence + freshness. Anything `< 25` confidence is flagged low-confidence;
+`stale`/`expired` claims demand a re-verify; unverified/inactive bonuses are
+flagged; restricted GEOs are disclosed (and targeting a restricted GEO triggers
+an explicit "do not target" warning).
+
+### Multilingual drafts
+
+`generateLocalizedDraft` produces **scaffolds** for `ru-KZ`, `kk-KZ`, `en-US`,
+`de-DE` — each carrying `machineGenerated`/`humanReviewRequired` and a note that
+it **requires human translation & review (not auto-translated)**. No fake
+localization, consistent with the locale engine (§14).
+
+### SEO philosophy
+
+Structures only — titles (≤60), meta descriptions (≤160), small **deduped**
+keyword clusters (no stuffing), FAQ ideas, and a placeholder CTA.
+
+### Commands (read-only previews)
+
+| Command | Output |
+|---|---|
+| `/draft [exchange]` | Telegram-post draft preview |
+| `/outline [exchange]` | Article outline + SEO title |
+| `/seo [exchange]` | SEO block preview |
+| `/localized [exchange]` | Multilingual scaffolds |
+
+### Tests
+
+| Suite | Covers |
+|---|---|
+| [`tests/content-engine.test.ts`](tests/content-engine.test.ts) | verification warnings, GEO-restriction disclosure, multilingual generation, SEO validity, no-fake-certainty, CTA placeholder rules, citations |
+
+---
+
+## 20. Roadmap (foundation is built for this)
 
 The architecture is deliberately modular to support, without rewrites:
 
@@ -1020,6 +1090,8 @@ The architecture is deliberately modular to support, without rewrites:
 - ✅ editorial workflow / queue (EPIC 008 — human-gated lifecycle connecting
   planner/research/verification/optimization/manual ideas; state-only, verification
   gates, no auto-publish/approve)
+- ✅ content generation engine (EPIC 009 — verification-aware drafts, SEO,
+  multilingual scaffolds; machine-generated + human-review-required, no auto-post)
 - scheduling (queue feeds a human-reviewed scheduler; still no auto-fire)
 - **analytics dashboard** — a UI over the normalized records + historical
   snapshots already produced by `analytics-layer` (Phase 7 data structure)

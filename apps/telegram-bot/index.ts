@@ -53,6 +53,14 @@ import {
   formatNext,
   formatAdded,
 } from '../../services/editorial-workflow/format';
+import { generateDraft, generateLocalizedDraft, ContentRequest } from '../../services/content-engine';
+import {
+  formatDraft,
+  formatOutline,
+  formatSeo,
+  formatLocalized,
+} from '../../services/content-engine/format';
+import { DraftType } from '../../src/types';
 import { logger } from '../../src/logger';
 
 /**
@@ -147,7 +155,7 @@ async function main() {
         `This chat id: <code>${msg.chat.id}</code>`,
         '',
         'Set <code>TELEGRAM_MODERATION_CHAT_ID</code> to this id in your .env to receive drafts here.',
-        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence, /locales, /plan, /weekplan, /backlog, /research, /trends, /discoveries, /signals, /insights, /suggestions, /learn, /queue, /queue_add, /review, /next',
+        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence, /locales, /plan, /weekplan, /backlog, /research, /trends, /discoveries, /signals, /insights, /suggestions, /learn, /queue, /queue_add, /review, /next, /draft, /outline, /seo, /localized',
       ].join('\n'),
       { parse_mode: 'HTML' },
     );
@@ -399,6 +407,39 @@ async function main() {
     if (!reportGate(msg)) return;
     seedWorkflow();
     void sendHtml(msg.chat.id, formatNext(workflow.all()));
+  });
+
+  // Content generation commands (EPIC 009). Read-only PREVIEWS — machine-generated,
+  // human-review-required; never published, posted, or auto-approved.
+  function contentRequest(type: DraftType, slug?: string): ContentRequest {
+    const topics = backlog(plannerInputs());
+    let topic = topics[0];
+    let exchange = topic?.exchange ? exchanges.get(topic.exchange) : undefined;
+    let bonus = exchange ? bonuses.forExchange(exchange.slug)[0] : undefined;
+    if (slug) {
+      exchange = exchanges.get(slug);
+      topic = topics.find((t) => t.exchange === slug) ?? topic;
+      bonus = bonuses.forExchange(slug)[0];
+    }
+    return { type, topic, exchange, bonus, claims: verifications.all(), locale: 'ru-KZ', geo: 'KZ' };
+  }
+
+  bot.onText(/\/draft(?:\s+(\S+))?/, (msg, match) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatDraft(generateDraft(contentRequest('telegram_post', match?.[1]?.toLowerCase()))));
+  });
+  bot.onText(/\/outline(?:\s+(\S+))?/, (msg, match) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatOutline(generateDraft(contentRequest('article_outline', match?.[1]?.toLowerCase()))));
+  });
+  bot.onText(/\/seo(?:\s+(\S+))?/, (msg, match) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatSeo(generateDraft(contentRequest('seo_snippet', match?.[1]?.toLowerCase()))));
+  });
+  bot.onText(/\/localized(?:\s+(\S+))?/, (msg, match) => {
+    if (!reportGate(msg)) return;
+    const draft = generateDraft(contentRequest('telegram_post', match?.[1]?.toLowerCase()));
+    void sendHtml(msg.chat.id, formatLocalized(generateLocalizedDraft(draft)));
   });
 
   // Lock a moderation message: append a status stamp and remove the buttons.
