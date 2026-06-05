@@ -762,3 +762,79 @@ export interface QueueReviewSummary {
   blockedByVerification: QueueItem[];
   notes: string[];
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// CONTENT GENERATION ENGINE (EPIC 009)
+//
+// Controlled, verification-AWARE draft generation. Produces Telegram drafts,
+// article outlines, SEO snippets and multilingual variants — all flagged
+// machine-generated + human-review-required. It NEVER publishes, posts, or
+// auto-approves; it implies no certainty beyond cited evidence, flags
+// unverified/stale claims, discloses GEO restrictions, and never injects real
+// affiliate links (CTA stays a placeholder).
+// ───────────────────────────────────────────────────────────────────────────
+
+export type DraftType =
+  | 'telegram_post'
+  | 'article_outline'
+  | 'seo_snippet'
+  | 'warning_post'
+  | 'educational_post';
+
+export type ContentTone = 'neutral' | 'educational' | 'cautionary' | 'promotional_safe';
+
+/** A traceable reference to the verification behind a claim used in a draft. */
+export interface VerificationCitation {
+  target: string; // claim id / "exchange:GEO"
+  confidence: number; // 0-100
+  freshness: FreshnessStatus;
+  reliable: boolean;
+  note: string;
+}
+
+/** SEO scaffolding — structures only, no keyword stuffing. */
+export interface SeoBlock {
+  title: string;
+  metaDescription: string; // ≤ 160 chars
+  keywordClusters: string[][];
+  faqIdeas: string[];
+  ctaPlaceholder: string; // "{{CTA}}"
+}
+
+/** One localized rendering of a draft (scaffold — needs human translation). */
+export interface DraftVariant {
+  locale: LocaleCode;
+  title: string;
+  body: string;
+  machineGenerated: boolean; // always true
+  humanReviewRequired: boolean; // always true
+  note: string;
+}
+
+export interface LocalizedDraft {
+  sourceId: string;
+  baseLocale: LocaleCode;
+  variants: DraftVariant[];
+}
+
+/** A generated draft — never published, always human-review-required. */
+export interface DraftContent {
+  id: string;
+  type: DraftType;
+  tone: ContentTone;
+  title: string;
+  body: string;
+  geo: string | null;
+  locale: LocaleCode;
+  exchange: string | null;
+  citations: VerificationCitation[];
+  /** Verification / GEO-restriction / unverified-bonus warnings. */
+  warnings: string[];
+  seo: SeoBlock | null;
+  ctaPlaceholder: string; // "{{CTA}}" — never a real link
+  machineGenerated: boolean; // always true
+  humanReviewRequired: boolean; // always true
+  /** Explicit "no fake certainty" note. */
+  confidenceNote: string;
+  createdAt: string;
+}
