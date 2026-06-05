@@ -57,7 +57,8 @@ cbw-kz/
 │   ├── backup-engine/       # Timestamped data backups + retention policy
 │   ├── merge-guardian/      # PR safety verdicts (evaluation-only, no auto-merge)
 │   ├── screenshot-registry/ # Evidence screenshots + redaction safety
-│   └── evidence-system/     # Evidence levels A–E, manual trust, missing-evidence queue
+│   ├── evidence-system/     # Evidence levels A–E, manual trust, missing-evidence queue
+│   └── manual-builder/      # GEO-aware, evidence-backed step-by-step guides + tester tasks
 ├── src/
 │   ├── pipeline.ts          # Orchestrator: fetch→dedupe→score→rewrite→send→log
 │   ├── draft-store.ts       # Draft lifecycle store (data/drafts.json)
@@ -1330,7 +1331,100 @@ evidence-*level* overview is `/evidence_levels` to avoid a clash.)
 
 ---
 
-## 24. Roadmap (foundation is built for this)
+## 24. Manual builder / GEO guide engine
+
+This layer turns evidence + GEO data + real screenshots into **honest,
+step-by-step exchange manuals**. It builds on the evidence system (EPIC 013): no
+step is ever marked "done" without proof, and any unverified step keeps the whole
+manual out of "fully verified".
+
+> **Why honesty beats fake tutorials.** A guide that *looks* complete but invents
+> a "deposit confirmed" screenshot is worse than useless — it's a trust breach.
+> Here, an unproven step is shown as unproven (level E, "requires local
+> verification") and converted into a precise task for a local tester. A real,
+> safe, fresh screenshot *raises* a step's evidence; an unsafe or outdated one
+> never does — it gets flagged. Nothing auto-publishes.
+
+### Manual structure (Phase 1)
+
+`buildGeoManual(exchange, topic, geo, { screenshots, now })` produces a
+`GeoManual`: `title, geo, locale, exchange, topic, steps[], warnings[],
+evidenceCoverage, weakestStep, readiness, requiresLocalTester, fullyVerified`.
+
+Topics: `p2p`, `kyc`, `deposit`, `withdrawal`, `launchpool`, `bonus`,
+`account_security`.
+
+Each **step** carries `title, description, evidenceLevel, screenshotIds[],
+warning, confidence, verificationStatus, requiresLocalTester, screenshotStatus`.
+Step templates start at honest baselines — live local actions begin at **E**
+(needs a tester), documented flows at **C** — and `{currency}` / `{payment}`
+placeholders are filled from GEO data.
+
+### Step trust (Phase 2)
+
+| Evidence | Verification status | Shown as |
+|---|---|---|
+| A / B | `verified` | "verified" |
+| C | `documented` | "according to official documentation" |
+| D | `reported` | "reported by users" (warning) |
+| E | `unverified` | "requires local verification" (warning, needs tester) |
+
+Any **E** step → manual `readiness: not_ready` and `fullyVerified: false`. A **D**
+step (no E) → `needs_review`. Only all-A/B/C + clean screenshots → `ready` /
+`fullyVerified`.
+
+### Screenshot integration (Phase 3)
+
+Screenshots are mapped to steps by a deterministic `claimId`
+(`exchange:geo:topic:stepId`). Per step the engine computes a `screenshotStatus`:
+
+- **present** — a safe, fresh screenshot (and it may *raise* the step's evidence),
+- **missing** — the step expects a screenshot but has none,
+- **outdated** — only stale (>90 days) screenshots exist (evidence not raised),
+- **unsafe** — a screenshot still needs redaction (blocked; evidence never raised).
+
+### GEO-specific guides (Phase 4)
+
+Markets: **Kazakhstan, Turkey, India, Nigeria, Germany**. Each `GeoGuideProfile`
+supplies local payment methods, GEO restrictions, fiat notes, KYC notes and
+availability notes, overlaid with the exchange's own GEO record (availability,
+P2P, KYC). Examples: KZ → Kaspi/Halyk/Freedom in KZT; DE → SEPA in EUR under
+EU/MiCA; IN → UPI/IMPS with banking-rail caveats.
+
+### Local tester tasks (Phase 5)
+
+`generateTesterTasks(manual)` emits precise tasks for weak steps: **what to
+test**, **screenshots required**, **what must be redacted**, **expected evidence
+level** (A for live-transaction steps, B for interface steps) and a priority (E →
+85, unsafe → 75, missing → 70, D → 55, outdated → 50). Examples it naturally
+produces: *Kaspi visible in Bybit P2P*, *KZT filter*, *KYC screen*, *deposit
+confirmation page*.
+
+### Guide safety rules (Phase 6)
+
+`GUIDE_SAFETY_RULES` extends the screenshot redaction rules: never expose card
+numbers, personal names, phone numbers, bank/IBAN details, QR/payment details,
+unredacted private chats, **live order/transaction IDs**, or **email addresses**.
+Unsafe screenshots are flagged on the step and the manual.
+
+### Commands (read-only)
+
+| Command | Output |
+|---|---|
+| `/manual <exchange> <topic> [geo]` | Full evidence-aware manual |
+| `/manual_step <exchange> <topic> <stepId> [geo]` | One step in detail |
+| `/guide_status` | Readiness across top exchanges × topics (KZ) |
+| `/tester_tasks` | Prioritized local-tester queue |
+
+### Tests
+
+| Suite | Covers |
+|---|---|
+| [`tests/manual-builder.test.ts`](tests/manual-builder.test.ts) | manual generation, evidence-aware phrasing, screenshot mapping (raise on safe/fresh), missing/outdated/unsafe detection, local tester tasks, GEO differences |
+
+---
+
+## 25. Roadmap (foundation is built for this)
 
 The architecture is deliberately modular to support, without rewrites:
 
@@ -1364,6 +1458,10 @@ The architecture is deliberately modular to support, without rewrites:
 - ✅ evidence / screenshot / manual-trust system (EPIC 013 — evidence levels A–E,
   screenshot redaction, manual readiness, missing-evidence queue; honesty over
   fake screenshots, local-tester routing, human review)
+- ✅ manual builder / GEO guide engine (EPIC 014 — step-by-step, evidence-aware,
+  GEO-specific manuals for KZ/TR/IN/NG/DE with screenshot mapping and local-tester
+  tasks; honesty over fake tutorials, never fully verified without proof, no
+  auto-publish)
 - scheduling (queue feeds a human-reviewed scheduler; still no auto-fire)
 - **analytics dashboard** — a UI over the normalized records + historical
   snapshots already produced by `analytics-layer` (Phase 7 data structure)

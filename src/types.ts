@@ -1105,3 +1105,85 @@ export interface MissingEvidenceTask {
   requiredReviewer: 'local_tester' | 'editor' | 'either';
   safeCaptureInstructions: string;
 }
+
+/**
+ * EPIC 014 — Manual builder / GEO guide engine.
+ *
+ * Builds honest, evidence-aware, GEO-specific exchange manuals. Steps are never
+ * fabricated as "done" — each step carries its own evidence level, confidence
+ * and screenshot mapping, and any unverified step keeps the whole manual out of
+ * "fully verified" status. Nothing here auto-publishes.
+ */
+export type GuideTopic =
+  | 'p2p'
+  | 'kyc'
+  | 'deposit'
+  | 'withdrawal'
+  | 'launchpool'
+  | 'bonus'
+  | 'account_security';
+
+/** How a step's evidence translates into a trust label. */
+export type StepVerificationStatus = 'verified' | 'documented' | 'reported' | 'unverified';
+
+/** Screenshot mapping outcome for a single step. */
+export type ScreenshotMappingStatus = 'present' | 'missing' | 'outdated' | 'unsafe';
+
+export interface GuideStep {
+  id: string;
+  title: string;
+  description: string;
+  evidenceLevel: EvidenceLevel;
+  screenshotIds: string[];
+  warning: string | null;
+  confidence: number; // 0-100
+  verificationStatus: StepVerificationStatus;
+  requiresLocalTester: boolean;
+  /** Screenshot mapping outcome (set when screenshots are evaluated). */
+  screenshotStatus: ScreenshotMappingStatus;
+}
+
+export interface GeoManual {
+  id: string;
+  title: string;
+  geo: string;
+  locale: string;
+  exchange: string;
+  topic: GuideTopic;
+  steps: GuideStep[];
+  warnings: string[];
+  /** % of steps backed by A/B/C evidence. */
+  evidenceCoverage: number;
+  weakestStep: { id: string; level: EvidenceLevel } | null;
+  readiness: PublishReadiness;
+  requiresLocalTester: boolean;
+  /** True only when every step is A/B/C and no screenshot issues remain. */
+  fullyVerified: boolean;
+}
+
+/** A GEO-specific guide profile (payments, restrictions, KYC, availability). */
+export interface GeoGuideProfile {
+  geo: string;
+  country: string;
+  locale: string;
+  currency: string;
+  paymentMethods: string[];
+  restrictions: string[];
+  fiatNotes: string;
+  kycNotes: string;
+  availabilityNotes: string;
+}
+
+/** A precise task for a local tester to capture real evidence. */
+export interface LocalTesterTask {
+  id: string;
+  exchange: string;
+  geo: string;
+  topic: GuideTopic;
+  stepId: string;
+  whatToTest: string;
+  screenshotsRequired: string[];
+  mustRedact: string[];
+  expectedEvidenceLevel: EvidenceLevel;
+  priority: number; // 0-100
+}
