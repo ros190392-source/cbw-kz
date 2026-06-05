@@ -17,7 +17,8 @@
     "restart": "pm2 restart cbw-kz-bot",
     "status": "pm2 status",
     "logs": "pm2 logs cbw-kz-bot",
-    "backup": "tsx scripts/backup.ts"
+    "backup": "tsx scripts/backup.ts",
+    "guardian": "tsx scripts/merge-guardian.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

@@ -955,3 +955,63 @@ export interface BackupResult {
   backup?: BackupInfo;
   error?: string;
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// MERGE GUARDIAN / SEMI-AUTONOMOUS OPS (EPIC 012)
+//
+// Evaluates PR safety and classifies it SAFE_TO_AUTO_MERGE / REQUIRES_HUMAN_REVIEW
+// / BLOCKED. EVALUATION + REPORTING ONLY — it never merges, never pushes, never
+// changes GitHub settings, and real auto-merge stays disabled. It exists to
+// build trust before any future semi-autonomous merge is even considered.
+// ───────────────────────────────────────────────────────────────────────────
+
+export type MergeVerdict = 'SAFE_TO_AUTO_MERGE' | 'REQUIRES_HUMAN_REVIEW' | 'BLOCKED';
+
+export type CiStatus = 'passing' | 'failing' | 'unknown';
+
+/** A snapshot of a PR/branch for the guardian to evaluate. */
+export interface PrSnapshot {
+  branch: string;
+  baseBranch: string;
+  ciStatus: CiStatus;
+  changedFiles: string[];
+  additions: number;
+  deletions: number;
+  /** Whether the PR adds/changes test files. */
+  hasTests: boolean;
+  /** Whether README/docs were updated. */
+  readmeUpdated: boolean;
+  /** Commits the branch is behind its base. */
+  behindBy: number;
+  /** Whether merging into base would conflict. */
+  mergeConflicts: boolean;
+  /** Age of the branch in days (since last commit). */
+  ageDays: number;
+  /** Optional raw diff text for content scanning (secrets / auto-publish). */
+  diffText?: string;
+}
+
+export interface PolicyFinding {
+  id: string;
+  level: 'block' | 'review' | 'info';
+  message: string;
+}
+
+export interface GuardianChecklistItem {
+  name: string;
+  ok: boolean;
+  note: string;
+}
+
+export interface MergeGuardianReport {
+  branch: string;
+  baseBranch: string;
+  verdict: MergeVerdict;
+  /** 0-100, higher = riskier. */
+  riskScore: number;
+  reasons: string[];
+  requiredHumanActions: string[];
+  blockedReasons: string[];
+  checklist: GuardianChecklistItem[];
+  generatedAt: string;
+}
