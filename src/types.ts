@@ -647,3 +647,56 @@ export interface ResearchSnapshot {
     rejected: number;
   };
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// OPTIMIZATION / LEARNING META-BRAIN (EPIC 007)
+//
+// Synthesizes analytics + verification + locale + research signals into
+// SELF-IMPROVEMENT SUGGESTIONS (scoring weights, source trust, topic priority,
+// locale focus, verification refresh, engagement patterns). STRICTLY
+// recommendation-only: nothing is auto-applied, no config is changed, no
+// autonomous action is taken. Sparse data yields low-confidence "investigate"
+// suggestions — uncertainty over overfitting.
+// ───────────────────────────────────────────────────────────────────────────
+
+export type SuggestionType =
+  | 'scoring_weight'
+  | 'source_trust'
+  | 'topic_priority'
+  | 'locale_focus'
+  | 'verification_refresh'
+  | 'engagement_pattern';
+
+export type SuggestionDirection = 'increase' | 'decrease' | 'maintain' | 'investigate';
+
+export type OptimizationConfidence = 'high' | 'medium' | 'low';
+
+/** A single, human-reviewable optimization recommendation. */
+export interface OptimizationSuggestion {
+  id: string;
+  type: SuggestionType;
+  /** What the suggestion is about (category / source / topic / locale / claim id). */
+  target: string;
+  direction: SuggestionDirection;
+  /** The observed metric that triggered it (context for the human). */
+  observation: string;
+  /** The recommended change — a human applies it; the system never does. */
+  recommendation: string;
+  rationale: string;
+  confidence: OptimizationConfidence;
+  /** Supporting sample size; small samples force low confidence. */
+  sampleSize: number;
+  /** Always true. */
+  humanReviewRequired: boolean;
+}
+
+export interface OptimizationSnapshot {
+  generatedAt: string;
+  suggestions: OptimizationSuggestion[];
+  summary: {
+    total: number;
+    byType: Record<string, number>;
+    highConfidence: number;
+  };
+  notes: string[];
+}
