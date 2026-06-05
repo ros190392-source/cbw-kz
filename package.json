@@ -11,7 +11,13 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "start": "pm2 start ecosystem.config.js",
+    "stop": "pm2 stop cbw-kz-bot",
+    "restart": "pm2 restart cbw-kz-bot",
+    "status": "pm2 status",
+    "logs": "pm2 logs cbw-kz-bot",
+    "backup": "tsx scripts/backup.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

@@ -8,3 +8,7 @@ data/*.json
 logs/*.log
 !data/.gitkeep
 !logs/.gitkeep
+
+# backups + PM2 runtime artifacts (EPIC 011)
+backups/
+.pm2/

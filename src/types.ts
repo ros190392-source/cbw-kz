@@ -902,3 +902,56 @@ export interface OperatorReport {
   queueStatus: Record<string, number>;
   notes: string[];
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// DEPLOYMENT / RUNTIME LAYER (EPIC 011)
+//
+// Production-runtime support: health checks, admin ALERTS (notification-only),
+// and timestamped backups with retention. None of this changes the
+// moderation/publish logic — there is still no auto-publishing or auto-approval.
+// ───────────────────────────────────────────────────────────────────────────
+
+export type RuntimeHealthStatus = 'green' | 'amber' | 'red';
+
+export interface HealthCheck {
+  name: string;
+  ok: boolean;
+  /** critical → failing turns the report red; warning → amber; info → never downgrades. */
+  level: 'critical' | 'warning' | 'info';
+  detail: string;
+}
+
+export interface HealthReport {
+  status: RuntimeHealthStatus;
+  checks: HealthCheck[];
+  generatedAt: string;
+}
+
+export type AlertType =
+  | 'startup'
+  | 'shutdown'
+  | 'health_red'
+  | 'pipeline_error'
+  | 'publish_failure'
+  | 'stale_data';
+
+export interface AdminAlert {
+  type: AlertType;
+  severity: 'info' | 'warn' | 'error';
+  message: string;
+  data?: Record<string, unknown>;
+  at: string;
+}
+
+export interface BackupInfo {
+  name: string;
+  path: string;
+  createdAt: string;
+  files: number;
+}
+
+export interface BackupResult {
+  ok: boolean;
+  backup?: BackupInfo;
+  error?: string;
+}
