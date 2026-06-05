@@ -8,6 +8,7 @@ import {
   ExchangeRecord,
   LocaleCode,
   LocalizedDraft,
+  EvidenceLevel,
   ResearchFinding,
   SeoBlock,
   VerificationCitation,
@@ -16,6 +17,7 @@ import {
 import { claimFreshness, computeConfidence, isReliable, needsRecheck } from '../verification-engine';
 import { effectiveVerification, isBonusActive } from '../exchange-registry';
 import { getLocale } from '../locale-engine';
+import { evidencePhrasing, evidenceWarning } from '../evidence-system';
 
 /**
  * Content generation engine (EPIC 009).
@@ -45,6 +47,8 @@ export interface ContentRequest {
   claims?: VerificationClaim[];
   locale?: LocaleCode;
   geo?: string;
+  /** Evidence level (EPIC 013) — drives claim phrasing + low-evidence warnings. */
+  evidenceLevel?: EvidenceLevel;
   now?: Date;
 }
 
@@ -121,6 +125,12 @@ export function buildWarnings(req: ContentRequest): string[] {
     if (geo && req.exchange.restrictedGeos.map((g) => g.toUpperCase()).includes(geo)) {
       warnings.push(`🚫 ${req.exchange.name} is RESTRICTED in ${geo} — do not target this market.`);
     }
+  }
+
+  // Evidence-level warning (EPIC 013): weak evidence (D/E) is flagged explicitly.
+  if (req.evidenceLevel) {
+    const w = evidenceWarning(req.evidenceLevel);
+    if (w) warnings.push(w);
   }
   return warnings;
 }
@@ -221,6 +231,10 @@ export function generateDraft(req: ContentRequest): DraftContent {
   const body = bodyFor(req.type, req, warnings);
   const seo = req.type === 'seo_snippet' || req.type === 'article_outline' ? buildSeo(req) : null;
 
+  const confidenceNote = req.evidenceLevel
+    ? `${CONFIDENCE_NOTE} Evidence level ${req.evidenceLevel} — claims may be phrased as "${evidencePhrasing(req.evidenceLevel)}".`
+    : CONFIDENCE_NOTE;
+
   return {
     id: `draft:${req.type}:${(req.topic?.id ?? req.finding?.id ?? exchange ?? 'generic')}`,
     type: req.type,
@@ -236,7 +250,7 @@ export function generateDraft(req: ContentRequest): DraftContent {
     ctaPlaceholder: CTA,
     machineGenerated: true,
     humanReviewRequired: true,
-    confidenceNote: CONFIDENCE_NOTE,
+    confidenceNote,
     createdAt: now.toISOString(),
   };
 }

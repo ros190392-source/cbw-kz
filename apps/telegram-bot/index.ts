@@ -81,6 +81,14 @@ import {
   formatPrRisk,
   formatSafeToMerge,
 } from '../../services/merge-guardian/format';
+import { ScreenshotRegistry } from '../../services/screenshot-registry';
+import { seedManuals, missingEvidenceQueue } from '../../services/evidence-system';
+import {
+  formatEvidenceLevels,
+  formatScreenshots,
+  formatMissingEvidence,
+  formatManualTrust,
+} from '../../services/evidence-system/format';
 import { DraftType } from '../../src/types';
 import { logger } from '../../src/logger';
 import http from 'http';
@@ -134,6 +142,7 @@ async function main() {
       : Promise.resolve(),
   );
   const backupEngine = new BackupEngine();
+  const screenshots = new ScreenshotRegistry();
   let lastPipelineRun: string | null = null;
   let lastError: string | null = null;
 
@@ -191,7 +200,7 @@ async function main() {
         `This chat id: <code>${msg.chat.id}</code>`,
         '',
         'Set <code>TELEGRAM_MODERATION_CHAT_ID</code> to this id in your .env to receive drafts here.',
-        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence, /locales, /plan, /weekplan, /backlog, /research, /trends, /discoveries, /signals, /insights, /suggestions, /learn, /queue, /queue_add, /review, /next, /draft, /outline, /seo, /localized, /operator, /today, /blocked, /health, /health_runtime, /backup, /runtime_status, /merge_guardian, /pr_risk, /safe_to_merge',
+        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence, /locales, /plan, /weekplan, /backlog, /research, /trends, /discoveries, /signals, /insights, /suggestions, /learn, /queue, /queue_add, /review, /next, /draft, /outline, /seo, /localized, /operator, /today, /blocked, /health, /health_runtime, /backup, /runtime_status, /merge_guardian, /pr_risk, /safe_to_merge, /evidence_levels, /screenshots, /missing_evidence, /manual_trust',
       ].join('\n'),
       { parse_mode: 'HTML' },
     );
@@ -558,6 +567,26 @@ async function main() {
     const report = guardianReport(match?.[1]);
     if (!report) { void sendHtml(msg.chat.id, 'Usage: <code>/safe_to_merge &lt;branch&gt; [base]</code>'); return; }
     void sendHtml(msg.chat.id, formatSafeToMerge(report));
+  });
+
+  // Evidence / screenshot / manual-trust commands (EPIC 013). Read-only.
+  // Note: /evidence (verification claims) already exists; the evidence-LEVEL
+  // overview is /evidence_levels to avoid a command collision.
+  bot.onText(/\/evidence_levels\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatEvidenceLevels(screenshots.all()));
+  });
+  bot.onText(/\/screenshots\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatScreenshots(screenshots.all()));
+  });
+  bot.onText(/\/missing_evidence\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatMissingEvidence(missingEvidenceQueue(seedManuals())));
+  });
+  bot.onText(/\/manual_trust\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatManualTrust(seedManuals()));
   });
 
   bot.onText(/\/runtime_status\b/, (msg) => {
