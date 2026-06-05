@@ -58,7 +58,8 @@ cbw-kz/
 │   ├── merge-guardian/      # PR safety verdicts (evaluation-only, no auto-merge)
 │   ├── screenshot-registry/ # Evidence screenshots + redaction safety
 │   ├── evidence-system/     # Evidence levels A–E, manual trust, missing-evidence queue
-│   └── manual-builder/      # GEO-aware, evidence-backed step-by-step guides + tester tasks
+│   ├── manual-builder/      # GEO-aware, evidence-backed step-by-step guides + tester tasks
+│   └── local-tester/        # Tester profiles, GEO routing, evidence submissions + human review
 ├── src/
 │   ├── pipeline.ts          # Orchestrator: fetch→dedupe→score→rewrite→send→log
 │   ├── draft-store.ts       # Draft lifecycle store (data/drafts.json)
@@ -1424,7 +1425,87 @@ Unsafe screenshots are flagged on the step and the manual.
 
 ---
 
-## 25. Roadmap (foundation is built for this)
+## 25. Local tester program / evidence-review network
+
+Real people in real GEOs capture the evidence the manual builder asks for; a
+**human reviewer** decides whether it counts. This layer turns the
+missing-evidence queue into routed tester tasks, takes submissions, and runs a
+strict review flow — without ever auto-approving, auto-publishing, or exposing
+private data.
+
+> **Why human verification stays mandatory.** A tester's screenshot is a
+> *proposal*, not a fact. Trust is earned over time, but every single submission
+> is still reviewed by a human, and unsafe evidence is blocked outright. We would
+> rather ship an honest "needs local verification" than a fast lie.
+
+### Tester profiles (Phase 1)
+
+`TesterProfile`: `id, nickname, geos[], languages[], exchanges[], specialties[],
+trustScore (0-100), trustLevel, approvedSubmissions, rejectedSubmissions,
+unsafeSubmissions, lastActiveAt, reviewerNotes`. Specialties: `p2p`, `kyc`,
+`deposit`, `withdrawal`, `launchpool`, `banking_methods`, `mobile_app`. New
+testers start at trust **50 (medium)**.
+
+### Task assignment / routing (Phase 2)
+
+`assignTasks(tasks, testers)` routes the missing-evidence queue to the
+best-matching tester by **GEO** (hard requirement — no GEO match → `unassigned`),
+**specialty** (mapped from the guide topic), **exchange**, **high-traffic GEO**
+bonus (KZ), and **effective trust**. Each assignment carries a `matchScore` and
+human-readable `reasons`.
+
+### Evidence submissions (Phase 3)
+
+`EvidenceSubmission`: `screenshotIds[], notes, evidenceLevelSuggested, testedFlow,
+geo, exchange, warnings[], sensitiveDataDetected, requiresRedaction, submittedAt`
++ review fields. Statuses: `pending_review`, `approved`, `rejected`,
+`needs_redaction`.
+
+### Review flow (Phase 4)
+
+Reviewer actions: `approve`, `reject`, `request_redaction`, `downgrade_evidence`,
+`request_retest` — **a `reviewerId` is required**. Approved submissions record a
+`finalEvidenceLevel` and can raise a step's evidence (via the screenshots they
+attach); `downgrade_evidence` approves at one level lower. Approvals raise trust;
+rejections lower it.
+
+### Trust scoring (Phase 5)
+
+Trust moves on each outcome (approve **+6**, reject **−12**, unsafe **−20**,
+request_redaction **−4**, downgrade **−3**, retest **−2**) and a staleness penalty
+(**−15** when inactive > 90 days, applied to the *effective* score, not stored).
+Levels: `low` (<40), `medium` (<65), `high` (<85), `trusted` (≥85).
+
+### Safety & privacy (Phase 6)
+
+A submission is scanned (`detectUnsafe`) for the tester's own sensitivity flags,
+forbidden text patterns (card numbers, IBAN, email, phone), and any mapped
+screenshot that still needs redaction. **An `approve` on unsafe evidence is
+blocked and forced to `needs_redaction` with no trust gain.** Never allowed,
+unredacted: bank card numbers, IBAN/account numbers, QR/payment codes, phone
+numbers, email addresses, personal names, chats, live transaction IDs.
+
+### Commands (read-only)
+
+| Command | Output |
+|---|---|
+| `/testers` | Tester roster, ranked by effective trust |
+| `/assignments` | Missing-evidence queue routed to testers (GEO/specialty) |
+| `/submission_review` | Pending submissions + safety scan + reviewer actions |
+| `/tester_score [id]` | One tester's trust + accept/reject ratio |
+
+(The raw, unrouted queue stays on EPIC 014's `/tester_tasks`; `/assignments` is
+the EPIC 015 routed view, named separately to avoid a command clash.)
+
+### Tests
+
+| Suite | Covers |
+|---|---|
+| [`tests/local-tester.test.ts`](tests/local-tester.test.ts) | trust scoring + staleness, GEO matching, specialty routing, unsafe detection, review flow (approve/reject/downgrade), unsafe-approval blocking, store persistence + end-to-end review |
+
+---
+
+## 26. Roadmap (foundation is built for this)
 
 The architecture is deliberately modular to support, without rewrites:
 
@@ -1462,6 +1543,10 @@ The architecture is deliberately modular to support, without rewrites:
   GEO-specific manuals for KZ/TR/IN/NG/DE with screenshot mapping and local-tester
   tasks; honesty over fake tutorials, never fully verified without proof, no
   auto-publish)
+- ✅ local tester program / evidence-review network (EPIC 015 — tester profiles,
+  GEO/specialty routing, evidence submissions, human review flow + trust scoring;
+  unsafe evidence blocked from approval, no auto-approve/auto-publish, privacy
+  enforced)
 - scheduling (queue feeds a human-reviewed scheduler; still no auto-fire)
 - **analytics dashboard** — a UI over the normalized records + historical
   snapshots already produced by `analytics-layer` (Phase 7 data structure)

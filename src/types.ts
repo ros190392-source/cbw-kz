@@ -1187,3 +1187,80 @@ export interface LocalTesterTask {
   expectedEvidenceLevel: EvidenceLevel;
   priority: number; // 0-100
 }
+
+/**
+ * EPIC 015 — Local tester program / evidence-review network.
+ *
+ * Real people in real GEOs capture evidence; a human reviewer approves it.
+ * Nothing here auto-approves, auto-publishes, or exposes private data. Unsafe
+ * evidence is blocked from approval until redacted. Tester trust is earned
+ * through accepted submissions and lost through rejected/unsafe ones.
+ */
+export type TesterSpecialty =
+  | 'p2p'
+  | 'kyc'
+  | 'deposit'
+  | 'withdrawal'
+  | 'launchpool'
+  | 'banking_methods'
+  | 'mobile_app';
+
+export type TesterTrustLevel = 'low' | 'medium' | 'high' | 'trusted';
+
+export interface TesterProfile {
+  id: string;
+  nickname: string;
+  geos: string[];
+  languages: string[];
+  exchanges: string[];
+  specialties: TesterSpecialty[];
+  trustScore: number; // 0-100
+  trustLevel: TesterTrustLevel;
+  approvedSubmissions: number;
+  rejectedSubmissions: number;
+  unsafeSubmissions: number;
+  lastActiveAt: string | null;
+  reviewerNotes: string;
+}
+
+export type SubmissionStatus = 'pending_review' | 'approved' | 'rejected' | 'needs_redaction';
+
+export interface EvidenceSubmission {
+  id: string;
+  testerId: string;
+  taskId: string | null;
+  exchange: string;
+  geo: string;
+  testedFlow: string;
+  screenshotIds: string[];
+  notes: string;
+  evidenceLevelSuggested: EvidenceLevel;
+  warnings: string[];
+  sensitiveDataDetected: boolean;
+  requiresRedaction: boolean;
+  status: SubmissionStatus;
+  submittedAt: string;
+  reviewedBy: string | null;
+  reviewerNote: string;
+  reviewedAt: string | null;
+  /** Final evidence level a reviewer settled on (may downgrade the suggestion). */
+  finalEvidenceLevel: EvidenceLevel | null;
+}
+
+export type ReviewAction =
+  | 'approve'
+  | 'reject'
+  | 'request_redaction'
+  | 'downgrade_evidence'
+  | 'request_retest';
+
+/** A missing-evidence task routed to the best-matching tester. */
+export interface TaskAssignment {
+  task: LocalTesterTask;
+  testerId: string | null;
+  nickname: string | null;
+  matchScore: number; // 0-100, higher = better fit
+  reasons: string[];
+  /** True when no tester covers this task's GEO. */
+  unassigned: boolean;
+}
