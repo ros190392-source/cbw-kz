@@ -25,7 +25,7 @@ import {
 } from '../../services/verification-engine/format';
 import { RssParser } from '../../services/rss-parser';
 import { SOURCES } from '../../config/sources';
-import { ResearchSnapshot } from '../../src/types';
+import { ResearchSnapshot, SuggestionType } from '../../src/types';
 import { buildSnapshot } from '../../services/research-engine/snapshot';
 import {
   formatResearch,
@@ -33,6 +33,12 @@ import {
   formatDiscoveries,
   formatSignals,
 } from '../../services/research-engine/format';
+import { buildOptimization, OptimizationStore } from '../../services/optimization-engine';
+import {
+  formatInsights,
+  formatSuggestions,
+  formatLearn,
+} from '../../services/optimization-engine/format';
 import { logger } from '../../src/logger';
 
 /**
@@ -71,6 +77,7 @@ async function main() {
   const bonuses = new BonusStore();
   const geo = new GeoEngine(exchanges.all());
   const verifications = new VerificationStore(exchanges.all());
+  const optimization = new OptimizationStore();
   const researchParser = new RssParser(SOURCES);
   let researchCache: { snap: ResearchSnapshot; at: number } | null = null;
   let running = false;
@@ -125,7 +132,7 @@ async function main() {
         `This chat id: <code>${msg.chat.id}</code>`,
         '',
         'Set <code>TELEGRAM_MODERATION_CHAT_ID</code> to this id in your .env to receive drafts here.',
-        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence, /locales, /plan, /weekplan, /backlog, /research, /trends, /discoveries, /signals',
+        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence, /locales, /plan, /weekplan, /backlog, /research, /trends, /discoveries, /signals, /insights, /suggestions, /learn',
       ].join('\n'),
       { parse_mode: 'HTML' },
     );
@@ -309,6 +316,30 @@ async function main() {
   bot.onText(/\/signals\b/, (msg) => {
     if (!reportGate(msg)) return;
     void researchCommand(msg.chat.id, (s) => formatSignals(s));
+  });
+
+  // Optimization / learning meta-brain commands (EPIC 007). Read-only, admin-gated.
+  // Suggestions only — applying them is a manual, human decision.
+  const optimizationSnapshot = () =>
+    buildOptimization({ posts: analytics.all(), claims: verifications.all() });
+
+  bot.onText(/\/insights\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    const snap = optimizationSnapshot();
+    optimization.save(snap); // persist the recommendation snapshot (no config change)
+    void sendHtml(msg.chat.id, formatInsights(snap));
+  });
+
+  // /suggestions [type]
+  bot.onText(/\/suggestions(?:\s+(\S+))?/, (msg, match) => {
+    if (!reportGate(msg)) return;
+    const type = (match?.[1] as SuggestionType | undefined) ?? undefined;
+    void sendHtml(msg.chat.id, formatSuggestions(optimizationSnapshot(), type));
+  });
+
+  bot.onText(/\/learn\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatLearn(optimizationSnapshot()));
   });
 
   // Lock a moderation message: append a status stamp and remove the buttons.

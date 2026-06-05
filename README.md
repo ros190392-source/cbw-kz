@@ -47,7 +47,8 @@ cbw-kz/
 │   ├── editorial-planner/   # Editorial brain: topics, prioritization, calendar
 │   ├── research-engine/     # Classifies news findings + snapshot/formatters
 │   ├── trend-engine/        # Momentum, trending/undercovered/emerging topics
-│   └── discovery-engine/    # Proposes registry candidates, rejects scams (no writes)
+│   ├── discovery-engine/    # Proposes registry candidates, rejects scams (no writes)
+│   └── optimization-engine/ # Meta-brain: self-improvement suggestions (recommend-only)
 ├── src/
 │   ├── pipeline.ts          # Orchestrator: fetch→dedupe→score→rewrite→send→log
 │   ├── draft-store.ts       # Draft lifecycle store (data/drafts.json)
@@ -879,7 +880,58 @@ nothing:
 
 ---
 
-## 17. Roadmap (foundation is built for this)
+## 17. Optimization / learning meta-brain
+
+The optimization engine (`services/optimization-engine`) is the system's
+**meta-brain**: it reads its own outputs — engagement analytics, verification
+freshness, locale performance, research findings — and proposes **self-improvement
+suggestions**. It is the top of the intelligence stack and, like every layer
+below it, **recommends but never acts**.
+
+> **Strictly recommendation-only.** No auto-publishing, **no auto-config changes**,
+> no autonomous actions. Nothing here edits scoring weights, source trust, the
+> planner, or the registry — it only *suggests*, and a human applies (or ignores)
+> each one. Sparse data yields low-confidence `investigate` suggestions —
+> uncertainty over overfitting. Every suggestion is `humanReviewRequired`.
+
+### What it suggests
+
+| Suggestion type | Signal | Example |
+|---|---|---|
+| `scoring_weight` | engagement vs. editorial score per category | "Bonus engages above average but scores low → consider increasing its weight" |
+| `source_trust` | engagement by news source | "Decrypt under-performs → consider lowering its weight" |
+| `topic_priority` | category engagement ranking (planner loop) | "Prioritize more Bonus topics; de-prioritize Regulation" |
+| `locale_focus` | per-locale engagement + coverage gaps | "Keep investing in ru-KZ; seed kk-KZ (uncovered)" |
+| `verification_refresh` | stale / low-confidence claims | "Re-verify `bybit:KZ:p2p` before it informs content" |
+| `engagement_pattern` | feedback-engine successful/weak patterns | "Lean into successful patterns; investigate weak ones" |
+
+### Confidence model
+
+Confidence is **gated by sample size** (`≥8 high · ≥3 medium · else low`), so a
+handful of posts can never produce a "high-confidence" recommendation. Each
+suggestion carries its `observation`, `recommendation`, `rationale`,
+`sampleSize` and `confidence`. Snapshots are persisted to
+`data/optimization-snapshots.json` for trend-over-time review.
+
+### Commands
+
+Admin-gated, **read-only**:
+
+| Command | Output |
+|---|---|
+| `/insights` | Snapshot summary: counts by type, top suggestions, notes (also persists the snapshot) |
+| `/suggestions [type]` | Full suggestion list, optionally filtered by type |
+| `/learn` | Engagement-pattern learning (successful vs weak) |
+
+### Tests
+
+| Suite | Covers |
+|---|---|
+| [`tests/optimization-engine.test.ts`](tests/optimization-engine.test.ts) | scoring/source/topic/locale suggestions, stale warnings, pattern learning, confidence-from-sample, snapshot + persistence |
+
+---
+
+## 18. Roadmap (foundation is built for this)
 
 The architecture is deliberately modular to support, without rewrites:
 
@@ -896,7 +948,9 @@ The architecture is deliberately modular to support, without rewrites:
   backlog, content-mix balance; recommend-only, human approves)
 - ✅ research / intelligence layer (EPIC 006 — findings, trends, discovery with
   scam rejection; recommend-only, never writes the registry)
-- AI scoring & ranking
+- ✅ AI learning / optimization meta-brain (EPIC 007 — scoring/source/topic/locale
+  tuning suggestions, stale warnings, pattern learning; recommend-only, nothing
+  auto-applied — a human reviews and applies each suggestion)
 - scheduling (planner output is ready to feed a human-reviewed scheduler)
 - **analytics dashboard** — a UI over the normalized records + historical
   snapshots already produced by `analytics-layer` (Phase 7 data structure)
