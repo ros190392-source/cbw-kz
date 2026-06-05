@@ -23,6 +23,16 @@ import {
   formatStale,
   formatEvidence,
 } from '../../services/verification-engine/format';
+import { RssParser } from '../../services/rss-parser';
+import { SOURCES } from '../../config/sources';
+import { ResearchSnapshot } from '../../src/types';
+import { buildSnapshot } from '../../services/research-engine/snapshot';
+import {
+  formatResearch,
+  formatTrends,
+  formatDiscoveries,
+  formatSignals,
+} from '../../services/research-engine/format';
 import { logger } from '../../src/logger';
 
 /**
@@ -61,7 +71,22 @@ async function main() {
   const bonuses = new BonusStore();
   const geo = new GeoEngine(exchanges.all());
   const verifications = new VerificationStore(exchanges.all());
+  const researchParser = new RssParser(SOURCES);
+  let researchCache: { snap: ResearchSnapshot; at: number } | null = null;
   let running = false;
+
+  // Build (or reuse, 5-min TTL) a read-only research snapshot from live feeds.
+  async function getSnapshot(): Promise<ResearchSnapshot> {
+    const TTL = 5 * 60 * 1000;
+    if (researchCache && Date.now() - researchCache.at < TTL) return researchCache.snap;
+    const items = await researchParser.fetchAll();
+    const snap = buildSnapshot(items, analytics.all(), {
+      exchanges: exchanges.all(),
+      bonuses: bonuses.all(),
+    });
+    researchCache = { snap, at: Date.now() };
+    return snap;
+  }
 
   // Guard against rapid repeated Approve clicks while a publish is in flight.
   const inFlight = new Set<string>();
@@ -100,7 +125,7 @@ async function main() {
         `This chat id: <code>${msg.chat.id}</code>`,
         '',
         'Set <code>TELEGRAM_MODERATION_CHAT_ID</code> to this id in your .env to receive drafts here.',
-        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence, /locales, /plan, /weekplan, /backlog',
+        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence, /locales, /plan, /weekplan, /backlog, /research, /trends, /discoveries, /signals',
       ].join('\n'),
       { parse_mode: 'HTML' },
     );
@@ -252,6 +277,38 @@ async function main() {
   bot.onText(/\/backlog\b/, (msg) => {
     if (!reportGate(msg)) return;
     void sendHtml(msg.chat.id, formatBacklog(backlog(plannerInputs())));
+  });
+
+  // Research / intelligence commands (EPIC 006). Read-only, admin-gated.
+  // They fetch live feeds (cached 5 min) and never write anything.
+  async function researchCommand(
+    chatId: number,
+    render: (snap: ResearchSnapshot) => string,
+  ): Promise<void> {
+    try {
+      await bot.sendMessage(chatId, '🔬 Researching live feeds…');
+      const snap = await getSnapshot();
+      await sendHtml(chatId, render(snap));
+    } catch (err) {
+      await bot.sendMessage(chatId, `❌ Research failed: ${(err as Error).message}`);
+    }
+  }
+
+  bot.onText(/\/research\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void researchCommand(msg.chat.id, (s) => formatResearch(s));
+  });
+  bot.onText(/\/trends\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void researchCommand(msg.chat.id, (s) => formatTrends(s));
+  });
+  bot.onText(/\/discoveries\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void researchCommand(msg.chat.id, (s) => formatDiscoveries(s));
+  });
+  bot.onText(/\/signals\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void researchCommand(msg.chat.id, (s) => formatSignals(s));
   });
 
   // Lock a moderation message: append a status stamp and remove the buttons.
