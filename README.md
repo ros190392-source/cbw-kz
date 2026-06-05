@@ -44,7 +44,10 @@ cbw-kz/
 │   ├── affiliate-layer/     # Affiliate metadata + CTA helpers (NEVER auto-injected)
 │   ├── verification-engine/ # Evidence, confidence scoring, freshness, KZ snapshots
 │   ├── locale-engine/       # Locales, GEO↔language routing, translation moderation
-│   └── editorial-planner/   # Editorial brain: topics, prioritization, calendar
+│   ├── editorial-planner/   # Editorial brain: topics, prioritization, calendar
+│   ├── research-engine/     # Classifies news findings + snapshot/formatters
+│   ├── trend-engine/        # Momentum, trending/undercovered/emerging topics
+│   └── discovery-engine/    # Proposes registry candidates, rejects scams (no writes)
 ├── src/
 │   ├── pipeline.ts          # Orchestrator: fetch→dedupe→score→rewrite→send→log
 │   ├── draft-store.ts       # Draft lifecycle store (data/drafts.json)
@@ -799,7 +802,84 @@ Notes: 🕒 36 stale claims · ⚠️ 3 unverified bonuses · ℹ️ Recommendat
 
 ---
 
-## 16. Roadmap (foundation is built for this)
+## 16. Research / intelligence layer
+
+The research layer continuously turns news inputs into **intelligence**:
+findings (research-engine), trends (trend-engine), and registry candidates
+(discovery-engine). It is the system's "scout" — it discovers and recommends,
+and **never** acts.
+
+> **Discovery philosophy + human-moderation guarantees.** No auto-publishing,
+> no auto-approval, no auto affiliate insertion, and **no automatic registry
+> writes**. Every finding is `humanVerificationRequired`; every discovery is a
+> *suggestion for manual review*. Confidence is never fabricated — weak sources
+> are downranked and obvious scam patterns are **rejected**, never surfaced as
+> candidates.
+
+### Research engine (Phase 2)
+
+Classifies each news item into a `ResearchFinding`:
+
+| Category | Priority |
+|---|---|
+| `launchpool`, `restriction`, `bonus` | HIGH |
+| `listing`, `regulation`, `kz` | MEDIUM |
+| `news` | LOW |
+
+A **KZ angle bumps** any non-HIGH finding up one level (so KZ regulation /
+restriction / listing become HIGH). Findings carry matched `signals`,
+`exchanges`, `geos`, a `SourceTrust` (`trusted`/`neutral`/`weak`) and a
+`confidence` (weak sources downranked). Batches are de-duplicated by normalized
+title and sorted HIGH-first.
+
+### Trend engine (Phase 3)
+
+Tallies findings (cross-referenced with published-post coverage from analytics)
+into `TrendSignal`s with a 0-100 **momentum** and a status:
+
+- `trending` (high momentum), `emerging` (just appeared),
+- `undercovered` (research interest but **no published coverage** — an editorial
+  gap), `steady`.
+
+### Discovery engine (Phase 4)
+
+Extracts unknown exchange / launchpool / bonus names from text, skips anything
+already in the registry, scores **confidence** and **scamRisk**, and **rejects**
+scam patterns (`guaranteed`, `100x`, `risk-free`, `connect wallet`, …). Output
+is always a `DiscoveryCandidate` with `suggestedAction: "Manual review required
+… (never auto-added)"`. **It never writes to the registry.**
+
+### Trust model
+
+| Source | Confidence base |
+|---|---|
+| trusted (Cointelegraph, The Block, Decrypt, CoinDesk…) | high |
+| neutral (unknown outlet) | medium |
+| weak (Medium/Substack/Telegram/forum/press release) | low |
+
+### Commands (Phase 5-6)
+
+Admin-gated, **read-only**; they fetch live feeds (cached 5 min) and write
+nothing:
+
+| Command | Output |
+|---|---|
+| `/research` | Classified findings, HIGH-first, with counts |
+| `/trends` | Trend signals (momentum + status) |
+| `/discoveries` | Registry candidates for manual review + rejected scams |
+| `/signals` | Priority shortlist: HIGH findings + undercovered/emerging trends |
+
+### Tests
+
+| Suite | Covers |
+|---|---|
+| [`tests/research-engine.test.ts`](tests/research-engine.test.ts) | classification, KZ priority boost, weak-source downranking, dedup |
+| [`tests/trend-engine.test.ts`](tests/trend-engine.test.ts) | momentum, trending/undercovered/emerging status |
+| [`tests/discovery-engine.test.ts`](tests/discovery-engine.test.ts) | unknown detection, known-skip, scam rejection, weak-source confidence |
+
+---
+
+## 17. Roadmap (foundation is built for this)
 
 The architecture is deliberately modular to support, without rewrites:
 
@@ -814,6 +894,8 @@ The architecture is deliberately modular to support, without rewrites:
   flow; wire MT providers + localized publishing under human review next)
 - ✅ editorial planning / editorial brain (EPIC 005 — daily/weekly plans, topic
   backlog, content-mix balance; recommend-only, human approves)
+- ✅ research / intelligence layer (EPIC 006 — findings, trends, discovery with
+  scam rejection; recommend-only, never writes the registry)
 - AI scoring & ranking
 - scheduling (planner output is ready to feed a human-reviewed scheduler)
 - **analytics dashboard** — a UI over the normalized records + historical

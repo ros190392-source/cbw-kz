@@ -561,3 +561,89 @@ export interface EditorialPlan {
   /** Editorial guidance: gaps, stale warnings, locale gaps, the human-gate note. */
   notes: string[];
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// RESEARCH / INTELLIGENCE LAYER (EPIC 006)
+//
+// Continuously discovers launchpools, listings, bonuses, regulation, KZ
+// developments and restrictions from news inputs; surfaces trends; and proposes
+// (never adds) registry candidates. Research RECOMMENDATIONS only — no
+// auto-publish, no auto-approve, no auto registry writes, no fake confidence.
+// Every actionable finding is marked human-verification-required.
+// ───────────────────────────────────────────────────────────────────────────
+
+export type ResearchCategory =
+  | 'launchpool'
+  | 'listing'
+  | 'bonus'
+  | 'regulation'
+  | 'kz'
+  | 'restriction'
+  | 'news';
+
+export type ResearchPriority = 'HIGH' | 'MEDIUM' | 'LOW';
+
+/** How much to trust the SOURCE a finding came from. */
+export type SourceTrust = 'trusted' | 'neutral' | 'weak';
+
+/** One classified research finding extracted from a news item. */
+export interface ResearchFinding {
+  id: string;
+  title: string;
+  link: string;
+  source: string;
+  category: ResearchCategory;
+  priority: ResearchPriority;
+  /** Exchanges mentioned (lowercased canonical names). */
+  exchanges: string[];
+  /** GEO tags, e.g. ["KZ"]. */
+  geos: string[];
+  /** Keywords that triggered the classification (explainability). */
+  signals: string[];
+  sourceTrust: SourceTrust;
+  confidence: number; // 0-100
+  reason: string;
+  /** Always true — nothing here is publishable without a human. */
+  humanVerificationRequired: boolean;
+  foundAt: string;
+}
+
+/** A detected trend across findings + analytics. */
+export interface TrendSignal {
+  key: string;
+  kind: 'keyword' | 'exchange' | 'geo' | 'category';
+  count: number;
+  momentum: number; // 0-100
+  status: 'emerging' | 'trending' | 'undercovered' | 'steady';
+  reason: string;
+}
+
+/** A proposed-but-unconfirmed addition to the registry. NEVER auto-added. */
+export interface DiscoveryCandidate {
+  id: string;
+  kind: 'exchange' | 'launchpool' | 'bonus';
+  name: string;
+  sourceLink: string;
+  source: string;
+  confidence: number; // 0-100
+  /** Scam-likelihood 0-100 (higher = riskier). */
+  scamRisk: number;
+  /** True when a scam pattern was detected → never suggested. */
+  rejected: boolean;
+  reason: string;
+  suggestedAction: string;
+}
+
+export interface ResearchSnapshot {
+  generatedAt: string;
+  findings: ResearchFinding[];
+  trends: TrendSignal[];
+  discoveries: DiscoveryCandidate[];
+  counts: {
+    high: number;
+    medium: number;
+    low: number;
+    discoveries: number;
+    rejected: number;
+  };
+}
