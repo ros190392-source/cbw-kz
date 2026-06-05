@@ -55,7 +55,9 @@ cbw-kz/
 │   ├── runtime-health/      # Production health checks + report formatters
 │   ├── admin-alerts/        # Notification-only operational alerts (no actions)
 │   ├── backup-engine/       # Timestamped data backups + retention policy
-│   └── merge-guardian/      # PR safety verdicts (evaluation-only, no auto-merge)
+│   ├── merge-guardian/      # PR safety verdicts (evaluation-only, no auto-merge)
+│   ├── screenshot-registry/ # Evidence screenshots + redaction safety
+│   └── evidence-system/     # Evidence levels A–E, manual trust, missing-evidence queue
 ├── src/
 │   ├── pipeline.ts          # Orchestrator: fetch→dedupe→score→rewrite→send→log
 │   ├── draft-store.ts       # Draft lifecycle store (data/drafts.json)
@@ -1257,7 +1259,78 @@ Also available as a CLI: `npm run guardian -- <branch> [base] [--ci passing]`.
 
 ---
 
-## 23. Roadmap (foundation is built for this)
+## 23. Evidence / screenshot / manual trust
+
+This layer makes trust **honest and traceable**: every manual step and GEO claim
+carries an evidence level, screenshots are registered with redaction safety, and
+anything unverified is routed to a local tester instead of being faked.
+
+> **Why honesty beats fake screenshots.** We never fabricate screenshots, never
+> claim a live banking/payment test without evidence, and never auto-publish. A
+> claim with weak evidence is *labelled* weak (and phrased cautiously), not
+> dressed up. Low evidence becomes a task for a human local tester.
+
+### Evidence levels (Phase 1)
+
+| Level | Meaning | Phrasing in content |
+|---|---|---|
+| **A** | our own live test | "verified" |
+| **B** | interface screenshot | "verified" |
+| **C** | official documentation | "according to official documentation" |
+| **D** | community / user report | "reported by users" |
+| **E** | not verified / needs local tester | "requires local verification" (+ warning) |
+
+`assessEvidence` derives a 0-100 confidence per level and decays it when the
+check is stale or undated. **E always sets `requiresLocalTester: true`.**
+
+### Screenshot registry (`services/screenshot-registry`, Phase 2 + 5)
+
+Records `id, exchange, geo, locale, claimId, screenshotType, filePath,
+capturedAt, reviewer, containsSensitiveData, redactionStatus, evidenceLevel,
+notes`. Types: `live_test`, `interface_only`, `official_doc`,
+`illustrative_mockup`, `user_submitted`. **Redaction safety:** anything marked
+sensitive is auto-set to `pending` and **blocked from use** until a human marks
+it `redacted`. Redaction rules forbid card numbers, personal names, phone
+numbers, bank/IBAN details, QR/payment details, and unredacted private chats.
+
+### Manual trust + missing-evidence queue (Phase 3-4)
+
+`buildManualTrust` turns a manual (P2P / KYC / bonus / launchpool / withdrawal /
+deposit) into a summary: evidence coverage %, weakest step, missing-evidence
+steps, and a readiness verdict (`ready` / `needs_review` / `not_ready` — any E
+step is `not_ready`). `missingEvidenceQueue` emits prioritized tasks (what to
+capture, why it matters, required reviewer, **safe-capture instructions**) — E
+steps go to a `local_tester` at priority 85. Seed manuals start honestly at low
+evidence.
+
+### Content integration (Phase 6)
+
+`generateDraft` accepts an `evidenceLevel`: A/B → "verified", C → "according to
+official documentation", D → "reported by users", E → "requires local
+verification". D/E add an explicit draft warning; the confidence note records
+the level.
+
+### Commands (read-only)
+
+| Command | Output |
+|---|---|
+| `/evidence_levels` | Legend + screenshot coverage by exchange |
+| `/screenshots` | Registry + redaction status + rules |
+| `/missing_evidence` | Prioritized missing-evidence queue |
+| `/manual_trust` | Manual readiness summaries |
+
+(`/evidence <slug>` remains the EPIC 003 verification-claim command; the
+evidence-*level* overview is `/evidence_levels` to avoid a clash.)
+
+### Tests
+
+| Suite | Covers |
+|---|---|
+| [`tests/evidence-system.test.ts`](tests/evidence-system.test.ts) | evidence scoring + staleness, screenshot persistence + sensitive-data redaction, manual readiness, missing-evidence generation, content phrasing/warning integration |
+
+---
+
+## 24. Roadmap (foundation is built for this)
 
 The architecture is deliberately modular to support, without rewrites:
 
@@ -1288,6 +1361,9 @@ The architecture is deliberately modular to support, without rewrites:
   alerts, backups + retention; no moderation/publish logic changed)
 - ✅ merge guardian / semi-autonomous ops foundation (EPIC 012 — PR safety
   verdicts + risk scoring; evaluation-only, real auto-merge intentionally disabled)
+- ✅ evidence / screenshot / manual-trust system (EPIC 013 — evidence levels A–E,
+  screenshot redaction, manual readiness, missing-evidence queue; honesty over
+  fake screenshots, local-tester routing, human review)
 - scheduling (queue feeds a human-reviewed scheduler; still no auto-fire)
 - **analytics dashboard** — a UI over the normalized records + historical
   snapshots already produced by `analytics-layer` (Phase 7 data structure)

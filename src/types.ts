@@ -1015,3 +1015,93 @@ export interface MergeGuardianReport {
   checklist: GuardianChecklistItem[];
   generatedAt: string;
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// EVIDENCE / SCREENSHOT / MANUAL TRUST SYSTEM (EPIC 013)
+//
+// Trust-aware evidence for manuals & GEO guides. Honesty over fake screenshots:
+// no fabricated screenshots, no claimed live tests without evidence, no
+// auto-publishing. Low evidence is flagged and routed to a local tester; the
+// human still reviews everything.
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Evidence strength:
+ *  A — verified by our own live test
+ *  B — verified by interface screenshot
+ *  C — verified by official documentation
+ *  D — verified by community / user report
+ *  E — not fully verified / needs a local tester
+ */
+export type EvidenceLevel = 'A' | 'B' | 'C' | 'D' | 'E';
+
+export interface EvidenceAssessment {
+  level: EvidenceLevel;
+  confidence: number; // 0-100
+  lastCheckedAt: string | null;
+  requiresLocalTester: boolean;
+  limitations: string;
+}
+
+export type ScreenshotType =
+  | 'live_test'
+  | 'interface_only'
+  | 'official_doc'
+  | 'illustrative_mockup'
+  | 'user_submitted';
+
+export type RedactionStatus = 'not_required' | 'pending' | 'redacted';
+
+export interface ScreenshotRecord {
+  id: string;
+  exchange: string;
+  geo: string;
+  locale: string;
+  claimId: string;
+  screenshotType: ScreenshotType;
+  /** Local path or URL to the asset. */
+  filePath: string;
+  capturedAt: string;
+  reviewer: string;
+  containsSensitiveData: boolean;
+  redactionStatus: RedactionStatus;
+  evidenceLevel: EvidenceLevel;
+  notes: string;
+}
+
+export type ManualTopic = 'P2P' | 'KYC' | 'bonus' | 'launchpool' | 'withdrawal' | 'deposit';
+
+export interface ManualStep {
+  id: string;
+  description: string;
+  evidenceLevel: EvidenceLevel;
+  screenshotId: string | null;
+  requiresLocalTester: boolean;
+}
+
+export type PublishReadiness = 'ready' | 'needs_review' | 'not_ready';
+
+export interface ManualTrustSummary {
+  manualId: string;
+  geo: string;
+  exchange: string;
+  topic: ManualTopic;
+  steps: ManualStep[];
+  /** % of steps backed by A/B/C evidence. */
+  evidenceCoverage: number;
+  weakestStep: { id: string; level: EvidenceLevel } | null;
+  missingEvidence: string[];
+  publishReadiness: PublishReadiness;
+}
+
+export interface MissingEvidenceTask {
+  id: string;
+  exchange: string;
+  geo: string;
+  claimOrStep: string;
+  whatToCapture: string;
+  whyItMatters: string;
+  priority: number; // 0-100
+  requiredReviewer: 'local_tester' | 'editor' | 'either';
+  safeCaptureInstructions: string;
+}
