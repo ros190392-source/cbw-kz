@@ -60,6 +60,13 @@ import {
   formatSeo,
   formatLocalized,
 } from '../../services/content-engine/format';
+import { buildOperatorReport, OperatorInputs } from '../../services/operator-engine';
+import {
+  formatOperator,
+  formatToday,
+  formatBlocked,
+  formatHealth,
+} from '../../services/operator-engine/format';
 import { DraftType } from '../../src/types';
 import { logger } from '../../src/logger';
 
@@ -155,7 +162,7 @@ async function main() {
         `This chat id: <code>${msg.chat.id}</code>`,
         '',
         'Set <code>TELEGRAM_MODERATION_CHAT_ID</code> to this id in your .env to receive drafts here.',
-        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence, /locales, /plan, /weekplan, /backlog, /research, /trends, /discoveries, /signals, /insights, /suggestions, /learn, /queue, /queue_add, /review, /next, /draft, /outline, /seo, /localized',
+        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence, /locales, /plan, /weekplan, /backlog, /research, /trends, /discoveries, /signals, /insights, /suggestions, /learn, /queue, /queue_add, /review, /next, /draft, /outline, /seo, /localized, /operator, /today, /blocked, /health',
       ].join('\n'),
       { parse_mode: 'HTML' },
     );
@@ -440,6 +447,39 @@ async function main() {
     if (!reportGate(msg)) return;
     const draft = generateDraft(contentRequest('telegram_post', match?.[1]?.toLowerCase()));
     void sendHtml(msg.chat.id, formatLocalized(generateLocalizedDraft(draft)));
+  });
+
+  // Operator / orchestration commands (EPIC 010). Read-only command center.
+  // Assembles a daily picture across all engines; recommends, never acts.
+  function operatorReport() {
+    seedWorkflow();
+    const inputs: OperatorInputs = {
+      posts: analytics.all(),
+      claims: verifications.all(),
+      bonuses: bonuses.all(),
+      exchanges: exchanges.all(),
+      queue: workflow.all(),
+      plannerTopics: backlog(plannerInputs()),
+      optimization: buildOptimization({ posts: analytics.all(), claims: verifications.all() }).suggestions,
+    };
+    return buildOperatorReport(inputs);
+  }
+
+  bot.onText(/\/operator\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatOperator(operatorReport()));
+  });
+  bot.onText(/\/today\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatToday(operatorReport()));
+  });
+  bot.onText(/\/blocked\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatBlocked(operatorReport()));
+  });
+  bot.onText(/\/health\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatHealth(operatorReport()));
   });
 
   // Lock a moderation message: append a status stamp and remove the buttons.

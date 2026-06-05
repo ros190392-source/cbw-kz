@@ -50,7 +50,8 @@ cbw-kz/
 │   ├── discovery-engine/    # Proposes registry candidates, rejects scams (no writes)
 │   ├── optimization-engine/ # Meta-brain: self-improvement suggestions (recommend-only)
 │   ├── editorial-workflow/  # Human-gated queue: idea→…→published (state only, no publish)
-│   └── content-engine/      # Verification-aware draft generation (machine-gen, review-required)
+│   ├── content-engine/      # Verification-aware draft generation (machine-gen, review-required)
+│   └── operator-engine/     # Command center: health, next actions, blocked (recommend-only)
 ├── src/
 │   ├── pipeline.ts          # Orchestrator: fetch→dedupe→score→rewrite→send→log
 │   ├── draft-store.ts       # Draft lifecycle store (data/drafts.json)
@@ -1067,7 +1068,57 @@ keyword clusters (no stuffing), FAQ ideas, and a placeholder CTA.
 
 ---
 
-## 20. Roadmap (foundation is built for this)
+## 20. Operator / orchestration layer
+
+The operator engine (`services/operator-engine`) is the **command center** at the
+top of the stack. It reads every other engine (research, planner, queue, content,
+verification, analytics, optimization) and produces a daily operating picture for
+the owner: system health, next-best actions, blocked items, the stale-verification
+queue and draft opportunities.
+
+> **Human-in-the-loop guarantees.** The operator **recommends, it never acts**.
+> No auto-publishing, no auto-approval, no autonomous writes to production. Every
+> emitted action is `humanRequired: true`, each one points to a *read-only* bot
+> command to run next, and building a report **never mutates** the queue or any
+> store. The human is always the final operator.
+
+### Daily cycle
+
+```
+/operator → health + ranked next actions + draft opportunities + queue status
+/today    → "what to work on": next actions + draft opportunities (with /draft commands)
+/blocked  → verification-blocked queue items + the stale-verification queue
+/health   → system-health summary (green / amber / red) + notes
+```
+
+### System health
+
+A `green` / `amber` / `red` status derived from verification confidence, stale
+claim ratio, unverified bonuses and blocked-queue count:
+
+- **red** — avg verification confidence < 20 or > 75% of claims stale
+- **amber** — some staleness, blocked items, unverified bonuses, or avg confidence < 50
+- **green** — fresh, verified, nothing blocked
+
+(A freshly-seeded system reads **red** by design — it hasn't been verified yet,
+and the operator says so rather than pretending otherwise.)
+
+### Next-best actions
+
+Ranked 0-100 across kinds: `review_queue` (items awaiting a decision / blocked),
+`verify` (stale claims, unverified bonuses), `create_draft` (top planner
+opportunity), `tune` (high-confidence optimization suggestions), `investigate`,
+and a `maintain` fallback when nothing is pressing — each with the command to run.
+
+### Tests
+
+| Suite | Covers |
+|---|---|
+| [`tests/operator-engine.test.ts`](tests/operator-engine.test.ts) | daily cycle generation, blocked-item detection, next-action ranking, stale-verification integration, health status, no-autonomous-action guarantee |
+
+---
+
+## 21. Roadmap (foundation is built for this)
 
 The architecture is deliberately modular to support, without rewrites:
 
@@ -1092,6 +1143,8 @@ The architecture is deliberately modular to support, without rewrites:
   gates, no auto-publish/approve)
 - ✅ content generation engine (EPIC 009 — verification-aware drafts, SEO,
   multilingual scaffolds; machine-generated + human-review-required, no auto-post)
+- ✅ operator / orchestration layer (EPIC 010 — daily command center, next-best
+  actions, health, blocked items; recommend-only, human is final operator)
 - scheduling (queue feeds a human-reviewed scheduler; still no auto-fire)
 - **analytics dashboard** — a UI over the normalized records + historical
   snapshots already produced by `analytics-layer` (Phase 7 data structure)

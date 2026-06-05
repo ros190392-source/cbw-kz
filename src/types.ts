@@ -838,3 +838,67 @@ export interface DraftContent {
   confidenceNote: string;
   createdAt: string;
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// OPERATOR / ORCHESTRATION LAYER (EPIC 010)
+//
+// A human-gated command center that orchestrates the daily editorial cycle by
+// reading every engine (research, planner, queue, content, verification,
+// analytics, optimization) and producing next-best-actions, blocked items, a
+// stale-verification queue, draft opportunities and a system-health summary.
+// It RECOMMENDS owner actions — it never publishes, approves, or writes to
+// production. The human remains the final operator.
+// ───────────────────────────────────────────────────────────────────────────
+
+export type OperatorActionType =
+  | 'verify'
+  | 'review_queue'
+  | 'create_draft'
+  | 'tune'
+  | 'investigate'
+  | 'maintain';
+
+export type SystemHealthStatus = 'green' | 'amber' | 'red';
+
+/** A recommended owner action — always executed by a human. */
+export interface OperatorAction {
+  id: string;
+  title: string;
+  kind: OperatorActionType;
+  priority: number; // 0-100
+  reason: string;
+  /** Suggested bot command to run next (read-only), or null. */
+  command: string | null;
+  /** Always true. */
+  humanRequired: boolean;
+}
+
+export interface SystemHealth {
+  status: SystemHealthStatus;
+  verificationConfidenceAvg: number;
+  staleClaims: number;
+  unverifiedBonuses: number;
+  queueActive: number;
+  queueBlocked: number;
+  publishedPosts: number;
+  notes: string[];
+}
+
+export interface DraftOpportunity {
+  id: string;
+  title: string;
+  priority: number;
+  exchange: string | null;
+}
+
+/** The daily operator command center — recommendation snapshot only. */
+export interface OperatorReport {
+  generatedAt: string;
+  health: SystemHealth;
+  nextActions: OperatorAction[];
+  blockedItems: QueueItem[];
+  staleVerifications: string[];
+  draftOpportunities: DraftOpportunity[];
+  queueStatus: Record<string, number>;
+  notes: string[];
+}
