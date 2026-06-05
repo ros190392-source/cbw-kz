@@ -51,7 +51,10 @@ cbw-kz/
 │   ├── optimization-engine/ # Meta-brain: self-improvement suggestions (recommend-only)
 │   ├── editorial-workflow/  # Human-gated queue: idea→…→published (state only, no publish)
 │   ├── content-engine/      # Verification-aware draft generation (machine-gen, review-required)
-│   └── operator-engine/     # Command center: health, next actions, blocked (recommend-only)
+│   ├── operator-engine/     # Command center: health, next actions, blocked (recommend-only)
+│   ├── runtime-health/      # Production health checks + report formatters
+│   ├── admin-alerts/        # Notification-only operational alerts (no actions)
+│   └── backup-engine/       # Timestamped data backups + retention policy
 ├── src/
 │   ├── pipeline.ts          # Orchestrator: fetch→dedupe→score→rewrite→send→log
 │   ├── draft-store.ts       # Draft lifecycle store (data/drafts.json)
@@ -1118,7 +1121,90 @@ and a `maintain` fallback when nothing is pressing — each with the command to 
 
 ---
 
-## 21. Roadmap (foundation is built for this)
+## 21. Deployment / runtime (production guide)
+
+The runtime layer makes CBW KZ safe to run in production: process management,
+health checks, notification-only alerts, and timestamped backups. **It changes
+no moderation/publish logic** — there is still no auto-publishing or
+auto-approval; the only persistent process is the human-gated bot.
+
+### Runtime environment
+
+Add these to `.env` (see `.env.example`):
+
+| Var | Default | Purpose |
+|---|---|---|
+| `NODE_ENV` | `development` | `production` in prod |
+| `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
+| `HEALTHCHECK_PORT` | `0` | >0 enables `GET /health` JSON endpoint (`503` when red) |
+| `BACKUP_DIR` | `./backups` | Where timestamped backups are written |
+| `BACKUP_RETENTION` | `7` | How many backups to keep |
+| `ALERTS_ENABLED` | `false` | Send admin alerts to the moderation chat (notification-only) |
+
+### Process management (PM2)
+
+`ecosystem.config.js` runs the bot as `cbw-kz-bot` (fork mode, autorestart,
+memory cap). Scripts:
+
+```bash
+npm run build      # optional: compile TS
+npm run start      # pm2 start ecosystem.config.js
+npm run status     # pm2 status
+npm run logs       # pm2 logs cbw-kz-bot
+npm run restart    # pm2 restart cbw-kz-bot
+npm run stop       # pm2 stop cbw-kz-bot
+pm2 save && pm2 startup   # persist across reboots
+```
+
+### Health checks (`services/runtime-health`)
+
+`checkRuntimeHealth` verifies: bot token, moderation chat, publish channel,
+admin ids, data/logs dir writability, `processed.json`/`drafts.json`
+readability, last pipeline run recency, and last error. Status is **red** (a
+critical check failed — e.g. no token/chat), **amber** (a warning — e.g. no
+channel/admins, corrupt store, recent error), or **green**. Exposed via
+`/health_runtime` and the optional `GET /health` endpoint.
+
+### Admin alerts (`services/admin-alerts`)
+
+Notification-ONLY alerts for `startup`, `shutdown`, `health_red`,
+`pipeline_error`, `publish_failure`, `stale_data`. They are sent to the
+moderation chat only when `ALERTS_ENABLED=true`, always audit-logged, and **take
+no action** — alerting can never crash or change the runtime.
+
+### Backups (`services/backup-engine`)
+
+Timestamped (`backup-YYYYMMDD-HHMMSS`) copies of `data/*.json` (optionally
+`logs/*.log`) with a retention policy. Run on demand via `/backup` (bot) or
+`npm run backup` (CLI; `-- --logs` to include logs). Schedule with cron/PM2 as
+needed. `backups/` is git-ignored.
+
+### Runtime commands
+
+| Command | Output |
+|---|---|
+| `/health_runtime` | Full runtime health report (alerts if red) |
+| `/backup` | Create a backup now + apply retention |
+| `/runtime_status` | Env, uptime, pid, alerts, last run/error, backups |
+
+### Operational safety notes
+
+- The bot is the **only** long-running process and is **human-gated** — Approve
+  is required for every publish; nothing here introduces automation.
+- A freshly-deployed instance reads **red/amber** until verification work is
+  done — that's intended (uncertainty over false confidence).
+- Keep `ALERTS_ENABLED=true` in production so failures surface immediately.
+- Back up `data/` regularly (it holds drafts, analytics, verification, queue).
+
+### Tests
+
+| Suite | Covers |
+|---|---|
+| [`tests/runtime-layer.test.ts`](tests/runtime-layer.test.ts) | health checks, missing-config detection, corrupt-store warning, backup creation, retention cleanup, alert formatting + delivery |
+
+---
+
+## 22. Roadmap (foundation is built for this)
 
 The architecture is deliberately modular to support, without rewrites:
 
@@ -1145,6 +1231,8 @@ The architecture is deliberately modular to support, without rewrites:
   multilingual scaffolds; machine-generated + human-review-required, no auto-post)
 - ✅ operator / orchestration layer (EPIC 010 — daily command center, next-best
   actions, health, blocked items; recommend-only, human is final operator)
+- ✅ deployment / runtime layer (EPIC 011 — PM2, health checks, notification-only
+  alerts, backups + retention; no moderation/publish logic changed)
 - scheduling (queue feeds a human-reviewed scheduler; still no auto-fire)
 - **analytics dashboard** — a UI over the normalized records + historical
   snapshots already produced by `analytics-layer` (Phase 7 data structure)

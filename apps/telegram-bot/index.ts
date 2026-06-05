@@ -67,8 +67,17 @@ import {
   formatBlocked,
   formatHealth,
 } from '../../services/operator-engine/format';
+import { checkRuntimeHealth, healthInputsFromConfig } from '../../services/runtime-health';
+import {
+  formatHealthReport,
+  formatRuntimeStatus,
+  formatBackupResult,
+} from '../../services/runtime-health/format';
+import { AdminAlerts } from '../../services/admin-alerts';
+import { BackupEngine } from '../../services/backup-engine';
 import { DraftType } from '../../src/types';
 import { logger } from '../../src/logger';
+import http from 'http';
 
 /**
  * Long-running Telegram bot — the main runtime for Phase 01.
@@ -112,6 +121,16 @@ async function main() {
   let researchCache: { snap: ResearchSnapshot; at: number } | null = null;
   let running = false;
 
+  // Runtime layer (EPIC 011): alerts (notification-only) + backups + health state.
+  const alerts = new AdminAlerts(config.runtime.alertsEnabled, (text) =>
+    config.telegram.moderationChatId
+      ? bot.sendMessage(config.telegram.moderationChatId, text, { parse_mode: 'HTML' }).then(() => undefined)
+      : Promise.resolve(),
+  );
+  const backupEngine = new BackupEngine();
+  let lastPipelineRun: string | null = null;
+  let lastError: string | null = null;
+
   // Build (or reuse, 5-min TTL) a read-only research snapshot from live feeds.
   async function getSnapshot(): Promise<ResearchSnapshot> {
     const TTL = 5 * 60 * 1000;
@@ -141,14 +160,18 @@ async function main() {
     running = true;
     try {
       const stats = await pipeline.run();
+      lastPipelineRun = new Date().toISOString();
       if (notifyChatId) {
         await bot.sendMessage(notifyChatId, `✅ Run complete\n<pre>${JSON.stringify(stats, null, 2)}</pre>`, {
           parse_mode: 'HTML',
         });
       }
     } catch (err) {
-      logger.error('bot', `Pipeline run failed: ${(err as Error).message}`);
-      if (notifyChatId) await bot.sendMessage(notifyChatId, `❌ Run failed: ${(err as Error).message}`);
+      lastError = (err as Error).message;
+      logger.error('bot', `Pipeline run failed: ${lastError}`);
+      // Notification-only alert — does not change pipeline/publish behaviour.
+      void alerts.send('pipeline_error', 'Pipeline run failed', { error: lastError });
+      if (notifyChatId) await bot.sendMessage(notifyChatId, `❌ Run failed: ${lastError}`);
     } finally {
       running = false;
     }
@@ -162,7 +185,7 @@ async function main() {
         `This chat id: <code>${msg.chat.id}</code>`,
         '',
         'Set <code>TELEGRAM_MODERATION_CHAT_ID</code> to this id in your .env to receive drafts here.',
-        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence, /locales, /plan, /weekplan, /backlog, /research, /trends, /discoveries, /signals, /insights, /suggestions, /learn, /queue, /queue_add, /review, /next, /draft, /outline, /seo, /localized, /operator, /today, /blocked, /health',
+        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence, /locales, /plan, /weekplan, /backlog, /research, /trends, /discoveries, /signals, /insights, /suggestions, /learn, /queue, /queue_add, /review, /next, /draft, /outline, /seo, /localized, /operator, /today, /blocked, /health, /health_runtime, /backup, /runtime_status',
       ].join('\n'),
       { parse_mode: 'HTML' },
     );
@@ -482,6 +505,47 @@ async function main() {
     void sendHtml(msg.chat.id, formatHealth(operatorReport()));
   });
 
+  // Runtime / deployment commands (EPIC 011). Read-only; backup copies files only.
+  const runtimeHealth = () =>
+    checkRuntimeHealth(healthInputsFromConfig({ lastPipelineRun, lastError }));
+
+  bot.onText(/\/health_runtime\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    const report = runtimeHealth();
+    if (report.status === 'red') {
+      void alerts.send('health_red', 'Runtime health is RED', {
+        failing: report.checks.filter((c) => !c.ok && c.level === 'critical').map((c) => c.name).join(', '),
+      });
+    }
+    void sendHtml(msg.chat.id, formatHealthReport(report));
+  });
+
+  bot.onText(/\/backup\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    const result = backupEngine.createBackup();
+    const pruned = result.ok ? backupEngine.applyRetention() : [];
+    void sendHtml(msg.chat.id, formatBackupResult(result, pruned));
+  });
+
+  bot.onText(/\/runtime_status\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(
+      msg.chat.id,
+      formatRuntimeStatus({
+        nodeEnv: config.runtime.nodeEnv,
+        logLevel: config.runtime.logLevel,
+        uptimeSec: process.uptime(),
+        pid: process.pid,
+        nodeVersion: process.version,
+        alertsEnabled: alerts.isEnabled(),
+        healthcheckPort: config.runtime.healthcheckPort,
+        lastPipelineRun,
+        lastError,
+        backups: backupEngine.listBackups(),
+      }),
+    );
+  });
+
   // Lock a moderation message: append a status stamp and remove the buttons.
   async function lockMessage(chatId: number | string, messageId: number, original: string, stamp: string) {
     try {
@@ -556,6 +620,10 @@ async function main() {
             chatId, messageId, original,
             `\n\n✅ PUBLISHED to channel (msg ${res.channelMessageId}) at ${utcStamp()}`,
           );
+        } else if (res.status === 'pending') {
+          // Publish failed and the draft was reverted to pending (logic in
+          // moderation-actions, unchanged). Notification-only alert.
+          void alerts.send('publish_failure', 'Publish to channel failed — draft reverted to pending', { id, message: res.message });
         } else if (res.status === 'published' && chatId && messageId) {
           // Was already published — make sure the buttons are gone.
           await lockMessage(chatId, messageId, original, `\n\n✅ Already published — duplicate click ignored.`);
@@ -575,7 +643,40 @@ async function main() {
 
   bot.on('polling_error', (err) => logger.error('bot', `Polling error: ${err.message}`));
 
+  // Optional HTTP health endpoint (EPIC 011). Disabled when HEALTHCHECK_PORT=0.
+  // Read-only: returns a JSON health report; performs no actions.
+  let healthServer: http.Server | null = null;
+  if (config.runtime.healthcheckPort > 0) {
+    healthServer = http.createServer((req, res) => {
+      if (req.url === '/health') {
+        const report = checkRuntimeHealth(healthInputsFromConfig({ lastPipelineRun, lastError }));
+        res.writeHead(report.status === 'red' ? 503 : 200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(report));
+      } else {
+        res.writeHead(404).end();
+      }
+    });
+    healthServer.listen(config.runtime.healthcheckPort, () =>
+      logger.info('bot', `Health endpoint on :${config.runtime.healthcheckPort}/health`),
+    );
+  }
+
+  // Graceful shutdown alert (notification-only).
+  const shutdown = (signal: string) => {
+    logger.info('bot', `Received ${signal} — shutting down.`);
+    void alerts.send('shutdown', `Bot shutting down (${signal}).`).finally(() => {
+      healthServer?.close();
+      process.exit(0);
+    });
+  };
+  process.once('SIGINT', () => shutdown('SIGINT'));
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+
   logger.info('bot', 'Bot started (polling). Running initial pipeline pass…');
+  await alerts.send('startup', 'CBW KZ bot started', {
+    env: config.runtime.nodeEnv,
+    channel: config.telegram.channelId || '(unset)',
+  });
   await runOnce();
 
   setInterval(() => void runOnce(), config.pipeline.pollIntervalMs);

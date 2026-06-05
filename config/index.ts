@@ -34,6 +34,19 @@ export const config = {
     data: path.resolve(process.cwd(), 'data'),
     logs: path.resolve(process.cwd(), 'logs'),
   },
+  /** Production runtime settings (EPIC 011). */
+  runtime: {
+    nodeEnv: process.env.NODE_ENV ?? 'development',
+    logLevel: process.env.LOG_LEVEL ?? 'info',
+    /** HTTP health-check port; 0 disables the health server. */
+    healthcheckPort: Number(process.env.HEALTHCHECK_PORT ?? 0),
+    backupDir: process.env.BACKUP_DIR
+      ? path.resolve(process.env.BACKUP_DIR)
+      : path.resolve(process.cwd(), 'backups'),
+    alertsEnabled: (process.env.ALERTS_ENABLED ?? 'false').toLowerCase() === 'true',
+    /** How many timestamped backups to retain. */
+    backupRetention: Number(process.env.BACKUP_RETENTION ?? 7),
+  },
 } as const;
 
 export type AppConfig = typeof config;
