@@ -18,7 +18,8 @@
     "status": "pm2 status",
     "logs": "pm2 logs cbw-kz-bot",
     "backup": "tsx scripts/backup.ts",
-    "guardian": "tsx scripts/merge-guardian.ts"
+    "guardian": "tsx scripts/merge-guardian.ts",
+    "publish": "tsx scripts/publish-telegram.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
