@@ -1264,3 +1264,66 @@ export interface TaskAssignment {
   /** True when no tester covers this task's GEO. */
   unassigned: boolean;
 }
+
+/**
+ * EPIC 016 — Telegram content command center.
+ *
+ * Operator-authored channel posts, managed entirely from Telegram. A post is
+ * drafted, optionally given an image from the asset folder, previewed, and
+ * published ONLY by an explicit /approve_publish from an admin. There is no
+ * automatic publishing — the approval command is the human gate.
+ */
+export type ChannelPostStatus = 'draft' | 'ready' | 'approved' | 'published' | 'rejected';
+
+/** Editorial category for an auto-generated post (EPIC 016 machine). */
+export type ContentPostType = 'education' | 'p2p_safety' | 'exchange_update' | 'news' | 'checklist';
+
+export interface ChannelPost {
+  id: string;
+  title: string;
+  caption: string;
+  /** Image filename within the asset folder, or null for a text post. */
+  assetFile: string | null;
+  topic: string;
+  postType: ContentPostType;
+  evidenceLevel: EvidenceLevel | null;
+  /** Prompt used (or to be used) to generate the image. */
+  imagePrompt: string | null;
+  /** True when this post must carry an image to publish (photo post). */
+  requiresImage: boolean;
+  status: ChannelPostStatus;
+  createdBy: string;
+  createdAt: string;
+  approvedBy: string | null;
+  decidedAt: string | null;
+  publishedAt: string | null;
+  channelMessageId: number | null;
+  rejectionReason: string | null;
+}
+
+export interface ContentCenterReport {
+  generatedAt: string;
+  totals: { draft: number; published: number; rejected: number };
+  today: { created: number; published: number; rejected: number };
+  pendingApproval: number;
+  lastPublished: { id: string; at: string; messageId: number | null } | null;
+}
+
+/** A planned day of content (EPIC 016 scheduler). */
+export interface DailyContentPlan {
+  date: string; // YYYY-MM-DD
+  items: { postType: ContentPostType; topicKey: string; title: string }[];
+}
+
+/** Morning/evening operating report for the content machine. */
+export interface ContentMachineReport {
+  generatedAt: string;
+  plan: DailyContentPlan;
+  counts: { draft: number; ready: number; approved: number; published: number; rejected: number };
+  publishedToday: number;
+  rejectedToday: number;
+  pending: { id: string; title: string; status: ChannelPostStatus }[];
+  missingImages: { id: string; title: string }[];
+  /** Planned post types that have no draft yet. */
+  gaps: ContentPostType[];
+}

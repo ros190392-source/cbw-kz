@@ -59,7 +59,9 @@ cbw-kz/
 │   ├── screenshot-registry/ # Evidence screenshots + redaction safety
 │   ├── evidence-system/     # Evidence levels A–E, manual trust, missing-evidence queue
 │   ├── manual-builder/      # GEO-aware, evidence-backed step-by-step guides + tester tasks
-│   └── local-tester/        # Tester profiles, GEO routing, evidence submissions + human review
+│   ├── local-tester/        # Tester profiles, GEO routing, evidence submissions + human review
+│   ├── content-center/      # Telegram-native publishing: drafts, assets, approve→publish
+│   └── content-machine/     # Autonomous draft+image generation, scheduler, safety, reports
 ├── src/
 │   ├── pipeline.ts          # Orchestrator: fetch→dedupe→score→rewrite→send→log
 │   ├── draft-store.ts       # Draft lifecycle store (data/drafts.json)
@@ -1505,7 +1507,122 @@ the EPIC 015 routed view, named separately to avoid a command clash.)
 
 ---
 
-## 26. Roadmap (foundation is built for this)
+## 26. Telegram content command center
+
+Run the whole `@cbw_kz` publishing flow **from inside Telegram** — draft, attach
+an image, preview, and publish — without touching the CLI. Captions arrive
+through Telegram intact (multiline, Cyrillic, emoji), which sidesteps the
+shell-argument mangling that plagues the CLI publisher.
+
+> **Approval is the gate.** A post only reaches the channel on an explicit
+> `/approve_publish` from an admin. There is no automatic publishing. Captions
+> are sent as **plain text** (exactly what the operator typed) so no markup can
+> break a post, and a published post can't be published again.
+
+### Commands (admin-gated, moderation chat)
+
+| Command | Action |
+|---|---|
+| `/new_post <text…>` | Create a draft (multiline caption supported) → returns a post id |
+| `/assets` | List images in `assets/telegram/kartinki-dlya-postov/` |
+| `/attach <id> <filename>` | Attach an asset image to a draft (validated) |
+| `/preview <id>` | Show the post + validation (ready / blockers) |
+| `/drafts` | List drafts awaiting approval |
+| `/approve_publish <id>` | **Human gate** — publish the post to `@cbw_kz` |
+| `/reject <id> [reason]` | Reject a draft |
+| `/post_report` | Daily report: created/published/rejected, pending, last published |
+
+### Model
+
+`ChannelPost` (`data/channel-posts.json`): `id, caption, assetFile, status
+(draft/published/rejected), createdBy, createdAt, approvedBy, decidedAt,
+publishedAt, channelMessageId, rejectionReason`. Ids are human-typable (`p1`,
+`p2`, …).
+
+### Safety
+
+- **Asset paths are sandboxed** to the asset folder — filenames with `/`, `\`,
+  or `..` are rejected (no path traversal).
+- `publishChannelPost` is the single send path and is **status-guarded**: it
+  refuses already-published, rejected, or invalid posts, and supports a dry run.
+- Photo caption limit 1024 / text 4096 enforced before sending.
+
+### Tests
+
+| Suite | Covers |
+|---|---|
+| [`tests/content-center.test.ts`](tests/content-center.test.ts) | asset listing + traversal rejection, post store + ids, attach/reject transitions, validation, guarded publish (text/photo/dry-run/duplicate refusal), daily report |
+
+---
+
+## 27. Autonomous content machine
+
+Builds on the command center (§26): the machine **prepares** posts (caption +
+image) from a topic plan and runs the safety validator on every draft — then
+hands them to the human-gated publish flow. **It never publishes on its own.**
+The loop is: *machine drafts → admin previews → admin `/approve_publish` → bot
+publishes.*
+
+> **Honest by construction.** Captions are deterministic, education-first, and
+> carry caveats. The safety validator blocks financial guarantees, promised
+> yields, fake-screenshot claims, and "available in Kazakhstan" assertions made
+> without a verify-caveat. There is no AI image generator wired in this
+> environment, so the image pipeline builds the prompt and falls back to a
+> template image — it never fabricates one.
+
+### Scheduler & post types
+
+`dailyPlan()` produces a day's plan across five post types: `education`,
+`p2p_safety`, `exchange_update`, `news`, `checklist`.
+
+### Generator
+
+`generateContentDraft(topicKey)` returns `{ title, caption, topic, postType,
+evidenceLevel, safetyViolations }` from safe templates. `generateContentPack()`
+creates drafts idempotently (skips topics that already have a non-rejected
+draft), resolves an image, and marks each `ready` only if it passes validation.
+
+### Image pipeline
+
+`buildImagePrompt(title, postType)` → a brand-safe prompt (no UI/screenshots/
+charts). `resolveImage()` tries a pluggable `ImageGenerator`, then **falls back**
+to a template image in the asset folder; if none exists, the draft is flagged as
+**missing an image** (and a photo post can't publish without one).
+
+### Draft model
+
+`ChannelPost` now carries `title, caption, assetFile (imagePath), topic,
+postType, evidenceLevel, imagePrompt, requiresImage, status (draft/ready/
+approved/published/rejected), createdAt, publishedAt, channelMessageId`.
+
+### Commands (admin-gated)
+
+| Command | Action |
+|---|---|
+| `/today_posts` | Today's plan + each topic's draft status |
+| `/generate_post [topic]` | Generate one topic, or fill the first pack |
+| `/generate_image <id>` | Run the image pipeline (generator → fallback) |
+| `/preview_post <id>` | Full preview + validation/blockers |
+| `/approve_publish <id>` | **Human gate** — publish to `@cbw_kz` |
+| `/reject_post <id> [reason]` | Reject a draft |
+| `/daily_report` | Morning plan / evening report: counts, pending, missing images, gaps |
+
+### First content pack
+
+`/generate_post` (no arg) creates five drafts: *What is USDT*, *What is P2P*,
+*How to avoid P2P scams*, *How to choose a P2P seller*, *Best exchanges for P2P
+in Kazakhstan* (the last at evidence **D** with explicit caveats — no "works in
+KZ" assertion).
+
+### Tests
+
+| Suite | Covers |
+|---|---|
+| [`tests/content-machine.test.ts`](tests/content-machine.test.ts) | safe first-pack generation, safety validator (guarantees/yields/fake screenshots/KZ-without-caveat), image fallback + generator + missing-image, idempotent pack, photo-post-needs-image, rejected-can't-publish, unsafe blocked, reporting (counts/missing/gaps) |
+
+---
+
+## 28. Roadmap (foundation is built for this)
 
 The architecture is deliberately modular to support, without rewrites:
 
@@ -1547,6 +1664,12 @@ The architecture is deliberately modular to support, without rewrites:
   GEO/specialty routing, evidence submissions, human review flow + trust scoring;
   unsafe evidence blocked from approval, no auto-approve/auto-publish, privacy
   enforced)
+- ✅ Telegram content command center (EPIC 016 — draft/attach/preview/approve_publish
+  from Telegram, asset folder integration, daily report; approval-gated, plain-text
+  captions, sandboxed asset paths, no auto-publish)
+- ✅ autonomous content machine (EPIC 016 — scheduler + safe generator + image
+  pipeline with template fallback + first content pack + morning/evening reports;
+  prepares drafts only, safety-validated, never auto-publishes)
 - scheduling (queue feeds a human-reviewed scheduler; still no auto-fire)
 - **analytics dashboard** — a UI over the normalized records + historical
   snapshots already produced by `analytics-layer` (Phase 7 data structure)

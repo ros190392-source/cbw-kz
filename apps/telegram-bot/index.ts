@@ -109,6 +109,28 @@ import {
   formatSubmissionReview,
   formatTesterScore,
 } from '../../services/local-tester/format';
+import { ChannelPostStore, listAssets, publishChannelPost, contentCenterReport } from '../../services/content-center';
+import {
+  formatNewPost,
+  formatDrafts,
+  formatPreview,
+  formatAssets,
+  formatContentReport,
+} from '../../services/content-center/format';
+import {
+  TOPICS,
+  dailyPlan,
+  generateContentPack,
+  resolveImage,
+  contentMachineReport,
+} from '../../services/content-machine';
+import {
+  formatTodayPosts,
+  formatGeneratedPack,
+  formatPreviewPost,
+  formatImageResult,
+  formatDailyReport,
+} from '../../services/content-machine/format';
 import { DraftType, GuideTopic } from '../../src/types';
 import { logger } from '../../src/logger';
 import http from 'http';
@@ -166,6 +188,7 @@ async function main() {
   const testers = new TesterRegistry();
   const submissions = new SubmissionStore();
   testers.seed(); // honest example testers on first run (idempotent)
+  const channelPosts = new ChannelPostStore();
   let lastPipelineRun: string | null = null;
   let lastError: string | null = null;
 
@@ -686,6 +709,124 @@ async function main() {
       return;
     }
     void sendHtml(msg.chat.id, formatTesterScore(testers.get(id)));
+  });
+
+  // ── Content command center (EPIC 016). Manage publishing from Telegram. ──
+  // Captions arrive intact (multiline/Cyrillic/emoji) — no CLI arg mangling.
+
+  // /new_post <caption text…> (multiline supported)
+  bot.onText(/\/new_post(?:@\w+)?\s+([\s\S]+)/, (msg, match) => {
+    if (!reportGate(msg)) return;
+    const caption = (match?.[1] ?? '').trim();
+    if (!caption) { void sendHtml(msg.chat.id, 'Usage: <code>/new_post your post text…</code>'); return; }
+    const by = msg.from?.username ?? String(msg.from?.id ?? 'admin');
+    void sendHtml(msg.chat.id, formatNewPost(channelPosts.create(caption, by)));
+  });
+
+  bot.onText(/\/drafts\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatDrafts(channelPosts.all()));
+  });
+
+  bot.onText(/\/assets\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatAssets(listAssets()));
+  });
+
+  // /attach <postId> <filename>
+  bot.onText(/\/attach(?:@\w+)?\s+(\S+)\s+(\S+)\s*$/, (msg, match) => {
+    if (!reportGate(msg)) return;
+    const res = channelPosts.attach((match?.[1] ?? '').trim(), (match?.[2] ?? '').trim());
+    if ('error' in res) { void sendHtml(msg.chat.id, `⚠️ ${res.error}`); return; }
+    void sendHtml(msg.chat.id, formatPreview(res));
+  });
+
+  // /preview <postId>
+  bot.onText(/\/preview(?:@\w+)?\s+(\S+)\s*$/, (msg, match) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatPreview(channelPosts.get((match?.[1] ?? '').trim())));
+  });
+
+  // /reject <postId> [reason]
+  bot.onText(/\/reject(?:@\w+)?\s+(\S+)(?:\s+([\s\S]+))?\s*$/, (msg, match) => {
+    if (!reportGate(msg)) return;
+    const by = msg.from?.username ?? String(msg.from?.id ?? 'admin');
+    const res = channelPosts.reject((match?.[1] ?? '').trim(), by, (match?.[2] ?? '').trim());
+    if ('error' in res) { void sendHtml(msg.chat.id, `⚠️ ${res.error}`); return; }
+    void sendHtml(msg.chat.id, `❌ Post <code>${res.id}</code> rejected.`);
+  });
+
+  // /approve_publish <postId> — THE human gate. Publishes to @cbw_kz.
+  bot.onText(/\/approve_publish(?:@\w+)?\s+(\S+)\s*$/, async (msg, match) => {
+    if (!reportGate(msg)) return;
+    const id = (match?.[1] ?? '').trim();
+    const post = channelPosts.get(id);
+    if (!post) { void sendHtml(msg.chat.id, `⚠️ Post not found: ${id}`); return; }
+    const by = msg.from?.username ?? String(msg.from?.id ?? 'admin');
+    try {
+      const res = await publishChannelPost(bot, config.telegram.channelId, post);
+      if (!res.ok) { void sendHtml(msg.chat.id, `⚠️ Not published: ${res.error}`); return; }
+      channelPosts.markPublished(id, by, res.messageId!);
+      void sendHtml(msg.chat.id, `✅ Published <code>${id}</code> to ${config.telegram.channelId} — message id ${res.messageId}`);
+    } catch (err) {
+      void sendHtml(msg.chat.id, `⚠️ Publish error: ${(err as Error).message}`);
+    }
+  });
+
+  bot.onText(/\/post_report\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatContentReport(contentCenterReport(channelPosts.all())));
+  });
+
+  // ── Autonomous content machine (EPIC 016). Prepare → preview → human approve. ──
+
+  bot.onText(/\/today_posts\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatTodayPosts(dailyPlan(), channelPosts.all()));
+  });
+
+  // /generate_post [topicKey] — one topic, or fill the whole first pack if omitted.
+  bot.onText(/\/generate_post(?:@\w+)?(?:\s+(\S+))?\s*$/, async (msg, match) => {
+    if (!reportGate(msg)) return;
+    const key = (match?.[1] ?? '').trim();
+    if (key && !TOPICS[key]) {
+      void sendHtml(msg.chat.id, `Unknown topic. Available: ${Object.keys(TOPICS).join(', ')}`);
+      return;
+    }
+    const by = msg.from?.username ?? String(msg.from?.id ?? 'admin');
+    const res = await generateContentPack(channelPosts, key ? [key] : undefined, { createdBy: by });
+    void sendHtml(msg.chat.id, formatGeneratedPack(res));
+  });
+
+  // /generate_image <id> — run the image pipeline (generator → fallback) for a draft.
+  bot.onText(/\/generate_image(?:@\w+)?\s+(\S+)\s*$/, async (msg, match) => {
+    if (!reportGate(msg)) return;
+    const post = channelPosts.get((match?.[1] ?? '').trim());
+    if (!post) { void sendHtml(msg.chat.id, `⚠️ Post not found.`); return; }
+    const img = await resolveImage(post.topic, post.title || post.topic, post.postType);
+    channelPosts.update(post.id, { imagePrompt: img.prompt, assetFile: img.imageFile ?? post.assetFile });
+    if (img.imageFile && post.status === 'draft') channelPosts.markReady(post.id);
+    void sendHtml(msg.chat.id, formatImageResult(channelPosts.get(post.id)!, img));
+  });
+
+  // /preview_post <id>
+  bot.onText(/\/preview_post(?:@\w+)?\s+(\S+)\s*$/, (msg, match) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatPreviewPost(channelPosts.get((match?.[1] ?? '').trim())));
+  });
+
+  // /reject_post <id> [reason]
+  bot.onText(/\/reject_post(?:@\w+)?\s+(\S+)(?:\s+([\s\S]+))?\s*$/, (msg, match) => {
+    if (!reportGate(msg)) return;
+    const by = msg.from?.username ?? String(msg.from?.id ?? 'admin');
+    const res = channelPosts.reject((match?.[1] ?? '').trim(), by, (match?.[2] ?? '').trim());
+    if ('error' in res) { void sendHtml(msg.chat.id, `⚠️ ${res.error}`); return; }
+    void sendHtml(msg.chat.id, `❌ Post <code>${res.id}</code> rejected.`);
+  });
+
+  bot.onText(/\/daily_report\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatDailyReport(contentMachineReport(channelPosts.all(), dailyPlan())));
   });
 
   bot.onText(/\/runtime_status\b/, (msg) => {
