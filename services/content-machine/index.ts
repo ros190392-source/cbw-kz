@@ -1,5 +1,3 @@
-import fs from 'fs';
-import path from 'path';
 import { logger } from '../../src/logger';
 import {
   ChannelPost,
@@ -8,12 +6,8 @@ import {
   DailyContentPlan,
   EvidenceLevel,
 } from '../../src/types';
-import {
-  ASSET_DIR,
-  ChannelPostStore,
-  assetExists,
-  validateContentSafety,
-} from '../content-center';
+import { ChannelPostStore, validateContentSafety } from '../content-center';
+import { ImageProvider, generatePremiumTelegramImage } from '../image-generator';
 
 /**
  * Autonomous content machine (EPIC 016).
@@ -111,41 +105,7 @@ export function generateContentDraft(topicKey: string): GeneratedDraft {
   };
 }
 
-// ── Image pipeline (prompt + fallback; tool-agnostic) ────────────────────────
-
-/** A pluggable image generator. Returns true if it wrote a usable file. */
-export interface ImageGenerator {
-  generate(prompt: string, outPath: string): Promise<boolean>;
-}
-
-/** Default generator: none wired in this environment → always falls back. */
-export const NullImageGenerator: ImageGenerator = {
-  async generate() {
-    return false;
-  },
-};
-
-/** Generic fallback image filename (used when a topic has no specific one). */
-export const GENERIC_FALLBACK = 'cbw_default_1280.png';
-
-/** Topic → preferred fallback image (must exist in the asset folder to be used). */
-const FALLBACK_BY_TOPIC: Record<string, string> = {
-  usdt_basics: 'cbw_kzt_usdt_p2p_1280.png',
-  p2p_basics: 'cbw_kzt_usdt_p2p_1280.png',
-  p2p_scams: 'cbw_kzt_usdt_p2p_1280.png',
-  choose_seller: 'cbw_kzt_usdt_p2p_1280.png',
-  best_exchanges_kz: 'cbw_kzt_usdt_p2p_1280.png',
-};
-
-/** Deterministic, brand-safe image prompt for a topic. */
-export function buildImagePrompt(title: string, postType: ContentPostType): string {
-  return (
-    `Dark premium fintech editorial illustration for "${title}" (${postType}). ` +
-    'CBW KZ brand: near-black background, gold (#E7B53C) and teal (#2BD4C4) accents, ' +
-    'clean geometric typography, Kazakhstan crypto-media tone. ' +
-    'No exchange UI, no screenshots, no logos, no candlestick charts, minimal text. 1280x720.'
-  );
-}
+// ── Image pipeline (delegates to the premium image-generator, EPIC 017) ──────
 
 export interface ImageResult {
   imageFile: string | null;
@@ -155,40 +115,22 @@ export interface ImageResult {
 }
 
 /**
- * Resolve an image for a draft: try the generator, else fall back to a template
- * image already present in the asset folder. Never fabricates — if nothing is
- * available, returns null (the draft is flagged as missing an image).
+ * Resolve a premium image for a draft via the image-generator service: try the
+ * configured provider (fal.ai / OpenAI), else fall back to the deterministic
+ * template image. Never fabricates — null means no image is available yet.
  */
 export async function resolveImage(
   topicKey: string,
   title: string,
-  postType: ContentPostType,
-  opts: { generator?: ImageGenerator; assetDir?: string } = {},
+  _postType: ContentPostType,
+  opts: { provider?: ImageProvider; assetDir?: string } = {},
 ): Promise<ImageResult> {
-  const assetDir = opts.assetDir ?? ASSET_DIR;
-  const generator = opts.generator ?? NullImageGenerator;
-  const prompt = buildImagePrompt(title, postType);
-
-  // 1) Try real generation.
-  const outName = `cbw_${topicKey}_${Date.now()}.png`;
-  try {
-    const ok = await generator.generate(prompt, path.join(assetDir, outName));
-    if (ok && fs.existsSync(path.join(assetDir, outName))) {
-      return { imageFile: outName, prompt, generated: true, usedFallback: false };
-    }
-  } catch (err) {
-    logger.error('content-machine', `Image generation failed, falling back: ${(err as Error).message}`);
-  }
-
-  // 2) Fallback to a template image if one exists.
-  for (const candidate of [FALLBACK_BY_TOPIC[topicKey], GENERIC_FALLBACK]) {
-    if (candidate && assetExists(candidate, assetDir)) {
-      return { imageFile: candidate, prompt, generated: false, usedFallback: true };
-    }
-  }
-
-  // 3) Nothing available — honest miss.
-  return { imageFile: null, prompt, generated: false, usedFallback: false };
+  const r = await generatePremiumTelegramImage(topicKey, title, 'premium_dark', {
+    provider: opts.provider,
+    assetDir: opts.assetDir,
+  });
+  const have = r.generated || r.usedFallback;
+  return { imageFile: have ? r.filename : null, prompt: r.prompt, generated: r.generated, usedFallback: r.usedFallback };
 }
 
 // ── First pack / pack generation ─────────────────────────────────────────────
@@ -207,7 +149,7 @@ export interface PackResult {
 export async function generateContentPack(
   store: ChannelPostStore,
   topicKeys: string[] = FIRST_PACK,
-  opts: { generator?: ImageGenerator; assetDir?: string; createdBy?: string; now?: Date } = {},
+  opts: { provider?: ImageProvider; assetDir?: string; createdBy?: string; now?: Date } = {},
 ): Promise<PackResult> {
   const result: PackResult = { created: [], skipped: [], missingImages: [] };
   for (const key of topicKeys) {
@@ -219,7 +161,7 @@ export async function generateContentPack(
       { title: draft.title, topic: draft.topic, postType: draft.postType, evidenceLevel: draft.evidenceLevel, requiresImage: true },
       opts.now,
     );
-    const img = await resolveImage(key, draft.title, draft.postType, opts);
+    const img = await resolveImage(key, draft.title, draft.postType, { provider: opts.provider, assetDir: opts.assetDir });
     store.update(post.id, { imagePrompt: img.prompt, assetFile: img.imageFile });
     if (!img.imageFile) result.missingImages.push(key);
     else store.markReady(post.id, opts.assetDir); // only succeeds if safe + valid

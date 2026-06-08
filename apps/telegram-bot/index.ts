@@ -109,7 +109,8 @@ import {
   formatSubmissionReview,
   formatTesterScore,
 } from '../../services/local-tester/format';
-import { ChannelPostStore, listAssets, publishChannelPost, contentCenterReport } from '../../services/content-center';
+import { ChannelPostStore, listAssets, publishChannelPost, contentCenterReport, assetPath } from '../../services/content-center';
+import { formatImagePrompts } from '../../services/image-generator/format';
 import {
   formatNewPost,
   formatDrafts,
@@ -785,7 +786,24 @@ async function main() {
     void sendHtml(msg.chat.id, formatTodayPosts(dailyPlan(), channelPosts.all()));
   });
 
+  // Send a draft preview (photo+caption, or text) to the admin chat. No publish.
+  const sendPostPreview = async (chatId: number, postId: string) => {
+    const p = channelPosts.get(postId);
+    if (!p) return;
+    const header = `🔍 PREVIEW — <b>${postId}</b> (${p.status})\nОпубликовать: /approve_publish ${postId} · Отклонить: /reject_post ${postId}\n\n`;
+    try {
+      if (p.assetFile) {
+        await bot.sendPhoto(chatId, assetPath(p.assetFile), { caption: header.replace(/<[^>]+>/g, '') + p.caption });
+      } else {
+        await bot.sendMessage(chatId, header + p.caption, { parse_mode: 'HTML' });
+      }
+    } catch (err) {
+      logger.error('bot', `Preview send failed for ${postId}: ${(err as Error).message}`);
+    }
+  };
+
   // /generate_post [topicKey] — one topic, or fill the whole first pack if omitted.
+  // Generates caption + premium/fallback image, then SENDS A PREVIEW. Never publishes.
   bot.onText(/\/generate_post(?:@\w+)?(?:\s+(\S+))?\s*$/, async (msg, match) => {
     if (!reportGate(msg)) return;
     const key = (match?.[1] ?? '').trim();
@@ -795,7 +813,8 @@ async function main() {
     }
     const by = msg.from?.username ?? String(msg.from?.id ?? 'admin');
     const res = await generateContentPack(channelPosts, key ? [key] : undefined, { createdBy: by });
-    void sendHtml(msg.chat.id, formatGeneratedPack(res));
+    await sendHtml(msg.chat.id, formatGeneratedPack(res));
+    for (const p of res.created) await sendPostPreview(msg.chat.id, p.id);
   });
 
   // /generate_image <id> — run the image pipeline (generator → fallback) for a draft.
@@ -827,6 +846,12 @@ async function main() {
   bot.onText(/\/daily_report\b/, (msg) => {
     if (!reportGate(msg)) return;
     void sendHtml(msg.chat.id, formatDailyReport(contentMachineReport(channelPosts.all(), dailyPlan())));
+  });
+
+  // /image_prompts — show the premium image prompts + configured provider.
+  bot.onText(/\/image_prompts\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatImagePrompts());
   });
 
   bot.onText(/\/runtime_status\b/, (msg) => {

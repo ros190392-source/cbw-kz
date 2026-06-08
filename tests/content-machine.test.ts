@@ -10,8 +10,8 @@ import {
   resolveImage,
   contentMachineReport,
   dailyPlan,
-  ImageGenerator,
 } from '../services/content-machine';
+import { ImageProvider } from '../services/image-generator';
 import {
   ChannelPostStore,
   publishChannelPost,
@@ -22,7 +22,15 @@ import {
 } from '../services/content-center';
 
 const NOW = new Date('2026-06-06T09:00:00.000Z');
-const FALLBACK = 'cbw_kzt_usdt_p2p_1280.png';
+// Each topic maps to its OWN deterministic image filename (EPIC 017).
+const TOPIC_IMG: Record<string, string> = {
+  usdt_basics: 'cbw_kzt_usdt_p2p_1280.png',
+  p2p_basics: 'cbw_p2p_simple_1280.png',
+  p2p_scams: 'cbw_p2p_scam_safety_1280.png',
+  choose_seller: 'cbw_payment_methods_1280.png',
+  best_exchanges_kz: 'cbw_exchange_reviews_1280.png',
+};
+const ALL_IMAGES = Object.values(TOPIC_IMG);
 
 const tmpDirs: string[] = [];
 function tmp(): string {
@@ -73,9 +81,9 @@ describe('generated content is safe', () => {
 
 describe('image pipeline (prompt + fallback)', () => {
   it('falls back to a template image when generation is unavailable', async () => {
-    const assets = assetTmp([FALLBACK]);
+    const assets = assetTmp([TOPIC_IMG.p2p_basics]);
     const img = await resolveImage('p2p_basics', 'P2P', 'education', { assetDir: assets });
-    expect(img.imageFile).toBe(FALLBACK);
+    expect(img.imageFile).toBe(TOPIC_IMG.p2p_basics);
     expect(img.usedFallback).toBe(true);
     expect(img.generated).toBe(false);
     expect(img.prompt).toMatch(/CBW KZ/);
@@ -87,27 +95,31 @@ describe('image pipeline (prompt + fallback)', () => {
     expect(img.usedFallback).toBe(false);
   });
 
-  it('uses a real generator when it produces a file', async () => {
+  it('uses a configured provider when it produces a file', async () => {
     const assets = assetTmp([]);
-    const gen: ImageGenerator = {
+    const provider: ImageProvider = {
+      name: 'test',
+      isConfigured() { return true; },
       async generate(_prompt, outPath) { fs.writeFileSync(outPath, 'img'); return true; },
     };
-    const img = await resolveImage('usdt_basics', 'USDT', 'education', { assetDir: assets, generator: gen });
+    const img = await resolveImage('usdt_basics', 'USDT', 'education', { assetDir: assets, provider });
     expect(img.generated).toBe(true);
-    expect(img.imageFile).toMatch(/^cbw_usdt_basics_/);
+    expect(img.imageFile).toBe(TOPIC_IMG.usdt_basics); // deterministic filename
   });
 });
 
 describe('first content pack', () => {
   it('generates 5 ready drafts (with fallback image), idempotently, never published', async () => {
-    const assets = assetTmp([FALLBACK]);
+    const assets = assetTmp(ALL_IMAGES);
     const store = new ChannelPostStore('posts.json', tmp());
     const res = await generateContentPack(store, undefined, { assetDir: assets, now: NOW });
     expect(res.created.length).toBe(5);
     expect(res.missingImages.length).toBe(0);
+    // every post type gets its OWN image (all distinct)
+    expect(new Set(res.created.map((p) => p.assetFile)).size).toBe(5);
     for (const p of res.created) {
       expect(p.status).toBe('ready');         // safe + has image
-      expect(p.assetFile).toBe(FALLBACK);
+      expect(p.assetFile).toBe(TOPIC_IMG[p.topic]);
       expect(p.requiresImage).toBe(true);
       expect(p.status).not.toBe('published');  // NEVER auto-published
       expect(p.channelMessageId).toBeNull();
@@ -143,7 +155,7 @@ describe('publish guardrails', () => {
 
   it('a rejected draft cannot publish, and unsafe captions are blocked', async () => {
     const { bot } = stubBot();
-    const assets = assetTmp([FALLBACK]);
+    const assets = assetTmp([TOPIC_IMG.p2p_basics]);
     const store = new ChannelPostStore('posts.json', tmp());
     await generateContentPack(store, ['p2p_basics'], { assetDir: assets, now: NOW });
     const post = store.byTopic('p2p_basics')!;

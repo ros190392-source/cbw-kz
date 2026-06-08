@@ -61,7 +61,8 @@ cbw-kz/
 │   ├── manual-builder/      # GEO-aware, evidence-backed step-by-step guides + tester tasks
 │   ├── local-tester/        # Tester profiles, GEO routing, evidence submissions + human review
 │   ├── content-center/      # Telegram-native publishing: drafts, assets, approve→publish
-│   └── content-machine/     # Autonomous draft+image generation, scheduler, safety, reports
+│   ├── content-machine/     # Autonomous draft+image generation, scheduler, safety, reports
+│   └── image-generator/     # Premium image pipeline: provider adapters, prompts, fallback
 ├── src/
 │   ├── pipeline.ts          # Orchestrator: fetch→dedupe→score→rewrite→send→log
 │   ├── draft-store.ts       # Draft lifecycle store (data/drafts.json)
@@ -1622,7 +1623,65 @@ KZ" assertion).
 
 ---
 
-## 28. Roadmap (foundation is built for this)
+## 28. Premium image generation pipeline
+
+The content machine pulls post images from a pluggable **image-generator**
+service (`services/image-generator/`). The flow is: *topic → premium prompt →
+provider generates (or fallback) → preview → human `/approve_publish`.* No image
+is ever auto-published.
+
+> **Honest by design.** When no provider is configured, the pipeline uses the
+> existing **fallback** images (rendered from the brand SVG templates) — it never
+> fabricates a result. Image prompts are safety-validated to forbid fake exchange
+> UI, fake Kaspi/banking screens, fake balances, screenshots, guaranteed-profit
+> and casino styling.
+
+### Provider adapter
+
+`ImageProvider { name, isConfigured(), generate(prompt, outPath) }`. Adapters:
+`FalProvider` (fal.ai), `OpenAIImageProvider`, and `NullProvider`.
+`getProvider()` reads `IMAGE_PROVIDER` (`fal` | `openai` | `none`). The fal/OpenAI
+adapters are **placeholders** — wire the real HTTP call where marked once a key is
+set; until then `isConfigured()` is false and the pipeline falls back.
+
+### Deterministic filenames (one per topic, all unique)
+
+| Prompt key | Topic | Filename |
+|---|---|---|
+| `usdt_intro` | `usdt_basics` | `cbw_kzt_usdt_p2p_1280.png` |
+| `p2p_explainer` | `p2p_basics` | `cbw_p2p_simple_1280.png` |
+| `p2p_scam_safety` | `p2p_scams` | `cbw_p2p_scam_safety_1280.png` |
+| `p2p_seller_checklist` | `choose_seller` | `cbw_payment_methods_1280.png` |
+| `exchange_overview_kz` | `best_exchanges_kz` | `cbw_exchange_reviews_1280.png` |
+
+Prompts are dark-premium-fintech, Kazakhstan/₸/USDT context, mobile-readable,
+1280×720. `generatePremiumTelegramImage(topic, caption, style)` builds the prompt,
+runs `validateImagePrompt`, then generates or falls back.
+
+### Commands
+
+`/generate_post <topic>` generates caption + image and **sends a preview** to the
+admin chat (status `ready`). `/generate_image <id>` (re)resolves an image,
+`/preview_post <id>`, `/approve_publish <id>` (human gate), `/reject_post <id>`,
+`/daily_report`, and `/image_prompts` (show prompts + configured provider).
+
+### Configure a provider
+
+```
+IMAGE_PROVIDER=fal        # or openai | none
+FAL_KEY=...               # for fal.ai
+OPENAI_IMAGE_KEY=...        # or reuse OPENAI_API_KEY for OpenAI images
+```
+
+### Tests
+
+| Suite | Covers |
+|---|---|
+| [`tests/image-generator.test.ts`](tests/image-generator.test.ts) | unique per-topic filenames, brand-safe prompt build, prompt safety (UI/screenshots/balances/guarantees/casino), provider generation stores path, fallback when provider missing, no-image case, provider selection |
+
+---
+
+## 29. Roadmap (foundation is built for this)
 
 The architecture is deliberately modular to support, without rewrites:
 
@@ -1670,6 +1729,10 @@ The architecture is deliberately modular to support, without rewrites:
 - ✅ autonomous content machine (EPIC 016 — scheduler + safe generator + image
   pipeline with template fallback + first content pack + morning/evening reports;
   prepares drafts only, safety-validated, never auto-publishes)
+- ✅ premium image generation pipeline (EPIC 017 — pluggable fal.ai/OpenAI provider
+  adapters, per-topic premium prompts + deterministic filenames, prompt safety,
+  fallback to template images when no provider; preview + human approve, no
+  auto-publish)
 - scheduling (queue feeds a human-reviewed scheduler; still no auto-fire)
 - **analytics dashboard** — a UI over the normalized records + historical
   snapshots already produced by `analytics-layer` (Phase 7 data structure)
