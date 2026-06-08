@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import sharp from 'sharp';
 import {
   generatePremiumTelegramImage,
   validateImagePrompt,
@@ -10,6 +11,7 @@ import {
   premiumFilenames,
   buildSubjectPrompt,
   promptForTopic,
+  applyPosterStyle,
   PREMIUM_PROMPTS,
   TOPIC_TO_PROMPT,
   FIRST_PREMIUM_PACK,
@@ -48,7 +50,7 @@ describe('prompt registry', () => {
   it('builds a brand-safe subject prompt with KZ/₸ context', () => {
     const p = buildSubjectPrompt('p2p_basics', '');
     expect(p).toMatch(/CBW KZ/);
-    expect(p).toMatch(/1280x720/);
+    expect(p).toMatch(/3:2/);
   });
 });
 
@@ -96,6 +98,20 @@ describe('generation + fallback', () => {
     const r = await generatePremiumTelegramImage('p2p_basics', 'P2P', 'premium_dark', { provider: NullProvider, assetDir: assetTmp([]) });
     expect(r.imagePath).toBeNull();
     expect(r.usedFallback).toBe(false);
+  });
+});
+
+describe('poster-style overlay', () => {
+  it('composites title + footer bar and preserves dimensions', async () => {
+    const dir = assetTmp([]);
+    const file = path.join(dir, 'x.png');
+    await sharp({ create: { width: 1536, height: 1024, channels: 3, background: '#0a0d13' } }).png().toFile(file);
+    const before = fs.statSync(file).size;
+    await applyPosterStyle(file, { title: 'Как не попасть на скам', subtitle: 'Безопасность в P2P' });
+    const meta = await sharp(file).metadata();
+    expect(meta.width).toBe(1536);
+    expect(meta.height).toBe(1024);
+    expect(fs.statSync(file).size).not.toBe(before); // overlay was added
   });
 });
 

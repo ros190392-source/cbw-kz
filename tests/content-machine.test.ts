@@ -11,7 +11,7 @@ import {
   contentMachineReport,
   dailyPlan,
 } from '../services/content-machine';
-import { ImageProvider } from '../services/image-generator';
+import { ImageProvider, NullProvider } from '../services/image-generator';
 import {
   ChannelPostStore,
   publishChannelPost,
@@ -24,7 +24,7 @@ import {
 const NOW = new Date('2026-06-06T09:00:00.000Z');
 // Each topic maps to its OWN deterministic image filename (EPIC 017).
 const TOPIC_IMG: Record<string, string> = {
-  usdt_basics: 'cbw_kzt_usdt_p2p_1280.png',
+  usdt_basics: 'cbw_usdt_intro_1280.png',
   p2p_basics: 'cbw_p2p_simple_1280.png',
   p2p_scams: 'cbw_p2p_scam_safety_1280.png',
   choose_seller: 'cbw_payment_methods_1280.png',
@@ -82,7 +82,7 @@ describe('generated content is safe', () => {
 describe('image pipeline (prompt + fallback)', () => {
   it('falls back to a template image when generation is unavailable', async () => {
     const assets = assetTmp([TOPIC_IMG.p2p_basics]);
-    const img = await resolveImage('p2p_basics', 'P2P', 'education', { assetDir: assets });
+    const img = await resolveImage('p2p_basics', 'P2P', 'education', { assetDir: assets, provider: NullProvider });
     expect(img.imageFile).toBe(TOPIC_IMG.p2p_basics);
     expect(img.usedFallback).toBe(true);
     expect(img.generated).toBe(false);
@@ -90,7 +90,7 @@ describe('image pipeline (prompt + fallback)', () => {
   });
 
   it('returns no image when neither generation nor a fallback exists', async () => {
-    const img = await resolveImage('p2p_basics', 'P2P', 'education', { assetDir: assetTmp([]) });
+    const img = await resolveImage('p2p_basics', 'P2P', 'education', { assetDir: assetTmp([]), provider: NullProvider });
     expect(img.imageFile).toBeNull();
     expect(img.usedFallback).toBe(false);
   });
@@ -112,7 +112,7 @@ describe('first content pack', () => {
   it('generates 5 ready drafts (with fallback image), idempotently, never published', async () => {
     const assets = assetTmp(ALL_IMAGES);
     const store = new ChannelPostStore('posts.json', tmp());
-    const res = await generateContentPack(store, undefined, { assetDir: assets, now: NOW });
+    const res = await generateContentPack(store, undefined, { assetDir: assets, now: NOW, provider: NullProvider });
     expect(res.created.length).toBe(5);
     expect(res.missingImages.length).toBe(0);
     // every post type gets its OWN image (all distinct)
@@ -125,7 +125,7 @@ describe('first content pack', () => {
       expect(p.channelMessageId).toBeNull();
     }
     // idempotent
-    const again = await generateContentPack(store, undefined, { assetDir: assets, now: NOW });
+    const again = await generateContentPack(store, undefined, { assetDir: assets, now: NOW, provider: NullProvider });
     expect(again.created.length).toBe(0);
     expect(again.skipped.length).toBe(5);
   });
@@ -133,7 +133,7 @@ describe('first content pack', () => {
   it('with no image available, drafts stay draft and are flagged missing', async () => {
     const assets = assetTmp([]); // no fallback present
     const store = new ChannelPostStore('posts.json', tmp());
-    const res = await generateContentPack(store, ['usdt_basics'], { assetDir: assets, now: NOW });
+    const res = await generateContentPack(store, ['usdt_basics'], { assetDir: assets, now: NOW, provider: NullProvider });
     expect(res.missingImages).toContain('usdt_basics');
     const post = store.byTopic('usdt_basics')!;
     expect(post.status).toBe('draft');
@@ -157,7 +157,7 @@ describe('publish guardrails', () => {
     const { bot } = stubBot();
     const assets = assetTmp([TOPIC_IMG.p2p_basics]);
     const store = new ChannelPostStore('posts.json', tmp());
-    await generateContentPack(store, ['p2p_basics'], { assetDir: assets, now: NOW });
+    await generateContentPack(store, ['p2p_basics'], { assetDir: assets, now: NOW, provider: NullProvider });
     const post = store.byTopic('p2p_basics')!;
 
     store.reject(post.id, 'editor', 'later');
@@ -173,7 +173,7 @@ describe('reporting', () => {
   it('reports pipeline counts, missing images and content gaps', async () => {
     const store = new ChannelPostStore('posts.json', tmp());
     // only 2 of 5 generated, no images → gaps + missing images
-    await generateContentPack(store, ['usdt_basics', 'p2p_basics'], { assetDir: assetTmp([]), now: NOW });
+    await generateContentPack(store, ['usdt_basics', 'p2p_basics'], { assetDir: assetTmp([]), now: NOW, provider: NullProvider });
     const r = contentMachineReport(store.all(), dailyPlan(NOW), NOW);
     expect(r.counts.draft).toBe(2);
     expect(r.missingImages.length).toBe(2);
