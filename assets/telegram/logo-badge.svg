@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="360" viewBox="0 0 360 360" role="img" aria-label="CBW KZ logo badge">
+  <defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#F2C75C"/><stop offset="55%" stop-color="#E7B53C"/><stop offset="100%" stop-color="#C9952C"/>
+    </linearGradient>
+  </defs>
+  <!-- badge disc (opaque so it cleanly sits on the artwork) -->
+  <circle cx="180" cy="180" r="168" fill="#0B0E14" fill-opacity="0.97"/>
+  <circle cx="180" cy="180" r="168" fill="none" stroke="url(#gold)" stroke-width="6"/>
+  <circle cx="180" cy="180" r="156" fill="none" stroke="#2A3344" stroke-width="1.5" opacity="0.7"/>
+
+  <!-- CBW : C + B white, W gold -->
+  <text x="180" y="196" text-anchor="middle" font-family="'Inter','Segoe UI',Arial,sans-serif" font-size="104" font-weight="800" letter-spacing="1">
+    <tspan fill="#F4F6FA">CB</tspan><tspan fill="url(#gold)">W</tspan>
+  </text>
+
+  <!-- KZ -->
+  <text x="180" y="246" text-anchor="middle" font-family="'Inter','Segoe UI',Arial,sans-serif" font-size="46" font-weight="800" letter-spacing="10" fill="url(#gold)">KZ</text>
+
+  <!-- tagline -->
+  <text x="180" y="280" text-anchor="middle" font-family="'Inter','Segoe UI',Arial,sans-serif" font-size="17" font-weight="600" letter-spacing="3" fill="#C9952C">CRYPTO · BONUS · WORLD</text>
+</svg>
