@@ -385,7 +385,7 @@ export function generateQueue(
       evidenceLevel: entry.evidenceLevel,
       requiresImage: true,
       scheduledAt: publishTime.toISOString(),
-    });
+    }, date);
     store.update(post.id, { status: 'planned' as ChannelPostStatus });
     const saved = store.get(post.id)!;
     result.created.push(saved);
