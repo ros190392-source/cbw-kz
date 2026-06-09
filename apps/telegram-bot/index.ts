@@ -126,6 +126,22 @@ import {
   contentMachineReport,
 } from '../../services/content-machine';
 import {
+  selectNext,
+  selectWeek,
+  generateQueue,
+  generateNextPost,
+  schedulerReport,
+  nextPublishSlot,
+  getPublishTimeUtc,
+} from '../../services/roadmap-scheduler';
+import {
+  formatNextPost,
+  formatWeekPlan,
+  formatSchedulerQueue,
+  formatScheduleResult,
+  formatSchedulerReport,
+} from '../../services/roadmap-scheduler/format';
+import {
   formatTodayPosts,
   formatGeneratedPack,
   formatPreviewPost,
@@ -247,7 +263,7 @@ async function main() {
         `This chat id: <code>${msg.chat.id}</code>`,
         '',
         'Set <code>TELEGRAM_MODERATION_CHAT_ID</code> to this id in your .env to receive drafts here.',
-        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence, /locales, /plan, /weekplan, /backlog, /research, /trends, /discoveries, /signals, /insights, /suggestions, /learn, /queue, /queue_add, /review, /next, /draft, /outline, /seo, /localized, /operator, /today, /blocked, /health, /health_runtime, /backup, /runtime_status, /merge_guardian, /pr_risk, /safe_to_merge, /evidence_levels, /screenshots, /missing_evidence, /manual_trust',
+        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence, /locales, /plan, /weekplan, /backlog, /research, /trends, /discoveries, /signals, /insights, /suggestions, /learn, /queue, /queue_add, /review, /next, /draft, /outline, /seo, /localized, /operator, /today, /blocked, /health, /health_runtime, /backup, /runtime_status, /merge_guardian, /pr_risk, /safe_to_merge, /evidence_levels, /screenshots, /missing_evidence, /manual_trust, /next_post, /plan_week, /sched_queue, /generate_next, /schedule_post, /scheduler_report',
       ].join('\n'),
       { parse_mode: 'HTML' },
     );
@@ -846,6 +862,70 @@ async function main() {
   bot.onText(/\/daily_report\b/, (msg) => {
     if (!reportGate(msg)) return;
     void sendHtml(msg.chat.id, formatDailyReport(contentMachineReport(channelPosts.all(), dailyPlan())));
+  });
+
+  // ── Roadmap scheduler (EPIC 019). Select, plan, queue — never auto-publish. ──
+
+  // /next_post — show the next recommended post from the roadmap
+  bot.onText(/\/next_post\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    const entry = selectNext({ allPosts: channelPosts.all() });
+    void sendHtml(msg.chat.id, formatNextPost(entry, nextPublishSlot(new Date()).toISOString()));
+  });
+
+  // /plan_week — project 7 days of content (dry preview, no store writes)
+  bot.onText(/\/plan_week\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatWeekPlan(selectWeek(channelPosts.all())));
+  });
+
+  // /sched_queue — show all planned/draft/ready/approved posts sorted by schedule
+  bot.onText(/\/sched_queue\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    const report = schedulerReport(channelPosts.all());
+    void sendHtml(msg.chat.id, formatSchedulerQueue(report.queue));
+  });
+
+  // /generate_next — select + generate next post (caption+image if template exists)
+  bot.onText(/\/generate_next\b/, async (msg) => {
+    if (!reportGate(msg)) return;
+    const by = msg.from?.username ?? String(msg.from?.id ?? 'admin');
+    await sendHtml(msg.chat.id, '⏳ Generating next post from roadmap…');
+    const post = await generateNextPost(channelPosts, { createdBy: by });
+    if (!post) {
+      void sendHtml(msg.chat.id, '📭 No eligible topic found.');
+      return;
+    }
+    void sendHtml(msg.chat.id, formatScheduleResult(post));
+    await sendPostPreview(msg.chat.id, post.id);
+  });
+
+  // /schedule_post <id> [YYYY-MM-DD] — set/update scheduledAt for a post
+  bot.onText(/\/schedule_post(?:@\w+)?\s+(\S+)(?:\s+(\S+))?\s*$/, (msg, match) => {
+    if (!reportGate(msg)) return;
+    const id = (match?.[1] ?? '').trim();
+    const dateArg = (match?.[2] ?? '').trim();
+    const post = channelPosts.get(id);
+    if (!post) { void sendHtml(msg.chat.id, formatScheduleResult(undefined, `Post not found: ${id}`)); return; }
+    if (post.status === 'published' || post.status === 'rejected') {
+      void sendHtml(msg.chat.id, formatScheduleResult(undefined, `Cannot schedule a ${post.status} post.`));
+      return;
+    }
+    let schedDate: Date;
+    if (dateArg && /^\d{4}-\d{2}-\d{2}$/.test(dateArg)) {
+      schedDate = new Date(dateArg + 'T12:00:00Z');
+    } else {
+      schedDate = new Date();
+    }
+    const publishTime = getPublishTimeUtc(schedDate);
+    channelPosts.update(id, { scheduledAt: publishTime.toISOString() });
+    void sendHtml(msg.chat.id, formatScheduleResult(channelPosts.get(id)));
+  });
+
+  // /scheduler_report — full scheduler report (ratios, progress, queue)
+  bot.onText(/\/scheduler_report\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatSchedulerReport(schedulerReport(channelPosts.all())));
   });
 
   // /image_prompts — show the premium image prompts + configured provider.

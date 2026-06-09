@@ -1273,7 +1273,7 @@ export interface TaskAssignment {
  * published ONLY by an explicit /approve_publish from an admin. There is no
  * automatic publishing — the approval command is the human gate.
  */
-export type ChannelPostStatus = 'draft' | 'ready' | 'approved' | 'published' | 'rejected';
+export type ChannelPostStatus = 'planned' | 'draft' | 'ready' | 'approved' | 'published' | 'rejected';
 
 /** Editorial category for an auto-generated post (EPIC 016 machine). */
 export type ContentPostType = 'education' | 'p2p_safety' | 'exchange_update' | 'news' | 'checklist';
@@ -1294,6 +1294,8 @@ export interface ChannelPost {
   status: ChannelPostStatus;
   createdBy: string;
   createdAt: string;
+  /** UTC ISO timestamp when this post is scheduled for publish (null = unscheduled). */
+  scheduledAt: string | null;
   approvedBy: string | null;
   decidedAt: string | null;
   publishedAt: string | null;
@@ -1319,7 +1321,7 @@ export interface DailyContentPlan {
 export interface ContentMachineReport {
   generatedAt: string;
   plan: DailyContentPlan;
-  counts: { draft: number; ready: number; approved: number; published: number; rejected: number };
+  counts: { planned: number; draft: number; ready: number; approved: number; published: number; rejected: number };
   publishedToday: number;
   rejectedToday: number;
   pending: { id: string; title: string; status: ChannelPostStatus }[];
