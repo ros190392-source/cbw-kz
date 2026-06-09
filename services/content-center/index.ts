@@ -64,6 +64,7 @@ export interface NewPostFields {
   imagePrompt?: string | null;
   requiresImage?: boolean;
   assetFile?: string | null;
+  scheduledAt?: string | null;
 }
 
 export function newPost(id: string, caption: string, createdBy: string, now: Date = new Date(), fields: NewPostFields = {}): ChannelPost {
@@ -80,6 +81,7 @@ export function newPost(id: string, caption: string, createdBy: string, now: Dat
     status: 'draft',
     createdBy: createdBy || 'admin',
     createdAt: now.toISOString(),
+    scheduledAt: fields.scheduledAt ?? null,
     approvedBy: null,
     decidedAt: null,
     publishedAt: null,
@@ -201,7 +203,7 @@ export function contentCenterReport(posts: ChannelPost[], now: Date = new Date()
   let lastPublished: ContentCenterReport['lastPublished'] = null;
 
   for (const p of posts) {
-    // draft/ready/approved are all "pending" for this simpler report.
+    // planned/draft/ready/approved are all "pending" for this simpler report.
     if (p.status === 'published') totals.published++;
     else if (p.status === 'rejected') totals.rejected++;
     else totals.draft++;
@@ -292,11 +294,11 @@ export class ChannelPostStore {
     return this.byId[id];
   }
 
-  /** Promote a draft to `ready` only if it passes validation. */
+  /** Promote a draft/planned post to `ready` only if it passes validation. */
   markReady(id: string, assetDir: string = ASSET_DIR): ChannelPost | { error: string } {
     const post = this.byId[id];
     if (!post) return { error: `Post not found: ${id}` };
-    if (post.status !== 'draft') return { error: `Post ${id} is ${post.status} — only drafts become ready.` };
+    if (post.status !== 'draft' && post.status !== 'planned') return { error: `Post ${id} is ${post.status} — only drafts/planned become ready.` };
     const problems = validatePost(post, assetDir);
     if (problems.length) return { error: problems.join(' ') };
     post.status = 'ready';
@@ -347,5 +349,5 @@ export class ChannelPostStore {
 }
 
 export function statusIcon(s: ChannelPostStatus): string {
-  return s === 'published' ? '✅' : s === 'rejected' ? '❌' : s === 'ready' ? '🟢' : s === 'approved' ? '👍' : '📝';
+  return s === 'published' ? '✅' : s === 'rejected' ? '❌' : s === 'ready' ? '🟢' : s === 'approved' ? '👍' : s === 'planned' ? '📅' : '📝';
 }

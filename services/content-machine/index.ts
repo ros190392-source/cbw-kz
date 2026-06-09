@@ -186,7 +186,7 @@ export function dailyPlan(now: Date = new Date()): DailyContentPlan {
 const sameUtcDay = (iso: string | null, now: Date) => !!iso && iso.slice(0, 10) === now.toISOString().slice(0, 10);
 
 export function contentMachineReport(posts: ChannelPost[], plan: DailyContentPlan, now: Date = new Date()): ContentMachineReport {
-  const counts = { draft: 0, ready: 0, approved: 0, published: 0, rejected: 0 };
+  const counts = { planned: 0, draft: 0, ready: 0, approved: 0, published: 0, rejected: 0 };
   let publishedToday = 0;
   let rejectedToday = 0;
   const pending: ContentMachineReport['pending'] = [];
@@ -196,7 +196,7 @@ export function contentMachineReport(posts: ChannelPost[], plan: DailyContentPla
     counts[p.status]++;
     if (p.status === 'published' && sameUtcDay(p.publishedAt, now)) publishedToday++;
     if (p.status === 'rejected' && sameUtcDay(p.decidedAt, now)) rejectedToday++;
-    if (p.status === 'draft' || p.status === 'ready' || p.status === 'approved') {
+    if (p.status === 'planned' || p.status === 'draft' || p.status === 'ready' || p.status === 'approved') {
       pending.push({ id: p.id, title: p.title || p.topic, status: p.status });
     }
     if (p.requiresImage && !p.assetFile && p.status !== 'rejected' && p.status !== 'published') {
