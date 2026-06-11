@@ -1,4 +1,5 @@
 import { RssParser } from '../services/rss-parser';
+import { buildEngagementIndex, EMPTY_ENGAGEMENT } from '../services/engagement';
 import { scoreItem } from '../services/scoring-layer';
 import { NewsRewriter } from '../services/news-rewriter';
 import { TelegramSender } from '../services/telegram-sender';
@@ -69,7 +70,11 @@ export class Pipeline {
   }
 
   async run(): Promise<RunStats> {
-    const items = await this.parser.fetchAll();
+    // Engagement heat (EPIC 022) is fetched alongside RSS — both fail-open.
+    const [items, engagement] = await Promise.all([
+      this.parser.fetchAll(),
+      buildEngagementIndex(config.engagement.cryptoPanicKey).catch(() => EMPTY_ENGAGEMENT),
+    ]);
     items.sort((a, b) => +new Date(b.publishDate) - +new Date(a.publishDate));
 
     const stats: RunStats = {
@@ -112,7 +117,10 @@ export class Pipeline {
 
       // Score + filter.
       const crossSourceCount = norm ? (coverage.get(norm)?.size ?? 1) : 1;
-      const score = scoreItem(item, this.weights[item.sourceId] ?? 0, { crossSourceCount });
+      const score = scoreItem(item, this.weights[item.sourceId] ?? 0, {
+        crossSourceCount,
+        engagementBoost: engagement.boostFor(item.title),
+      });
       if (score.priority === 'REJECT') {
         stats.rejected++;
         const rec = makeRecord(item, 'rejected', {

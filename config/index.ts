@@ -29,6 +29,10 @@ export const config = {
     minScore: Number(process.env.MODERATION_MIN_SCORE ?? 3),
     maxPerRun: Number(process.env.MAX_ITEMS_PER_RUN ?? 10),
   },
+  engagement: {
+    /** Free CryptoPanic API token; engagement layer skips the source without one. */
+    cryptoPanicKey: process.env.CRYPTOPANIC_KEY ?? '',
+  },
   autopublish: {
     /** 'news' = global news lane (EPIC 021); 'roadmap' = legacy KZ education lane. */
     mode: (process.env.AUTOPUBLISH_MODE ?? 'news') as 'news' | 'roadmap',
