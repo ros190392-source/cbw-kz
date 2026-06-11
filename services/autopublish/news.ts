@@ -2,6 +2,7 @@ import { DraftStore } from '../../src/draft-store';
 import { DraftRecord } from '../../src/types';
 import { SenderBot, validateContentSafety } from '../content-center';
 import { renderNewsCard, detectCountry } from '../news-card';
+import { buildFunnelFooter } from '../funnel';
 import { AutopublishStore } from './index';
 import { logger } from '../../src/logger';
 
@@ -74,12 +75,13 @@ export function selectTopNewsDraft(drafts: DraftRecord[], now: Date = new Date()
 /** Telegram photo-caption limit. */
 const CAPTION_LIMIT = 1024;
 
-/** Build the channel caption: post body + source attribution. */
+/** Build the channel caption: post body + source attribution + CBW funnel footer. */
 export function buildNewsCaption(rec: DraftRecord): string {
+  const funnel = `\n\n${buildFunnelFooter(`${rec.title} ${rec.text}`)}`;
   const attribution = `\n\n📰 ${rec.source}\n${rec.link}`;
-  const maxBody = CAPTION_LIMIT - attribution.length;
+  const maxBody = CAPTION_LIMIT - attribution.length - funnel.length;
   const body = rec.text.length > maxBody ? rec.text.slice(0, maxBody - 2).trimEnd() + ' …' : rec.text;
-  return `${body}${attribution}`;
+  return `${body}${attribution}${funnel}`;
 }
 
 // ── Tick ────────────────────────────────────────────────────────────────────
