@@ -58,12 +58,15 @@ export class Pipeline {
   private parser = new RssParser(SOURCES);
   private rewriter = new NewsRewriter(config.ai);
   private store = new JsonStore();
-  private drafts = new DraftStore();
+  private drafts: DraftStore;
   private weights: Record<string, number> = Object.fromEntries(
     SOURCES.map((s) => [s.id, s.weight ?? 0]),
   );
 
-  constructor(private sender?: TelegramSender) {}
+  /** `drafts` can be shared with the bot so both see one live copy. */
+  constructor(private sender?: TelegramSender, drafts?: DraftStore) {
+    this.drafts = drafts ?? new DraftStore();
+  }
 
   async run(): Promise<RunStats> {
     const items = await this.parser.fetchAll();
@@ -75,6 +78,18 @@ export class Pipeline {
     };
     const seenThisRun = new Set<string>();
     const candidates: { item: NewsItem; score: ScoreResult }[] = [];
+
+    // ---- Pass 0: cross-source coverage (popularity signal) -----------------
+    // The same story carried by several independent feeds = trending. Count
+    // distinct sources per normalized title across the whole batch BEFORE
+    // de-duping, so the duplicate we drop still boosts the copy we keep.
+    const coverage = new Map<string, Set<string>>();
+    for (const item of items) {
+      const norm = normalizeTitle(item.title);
+      if (!norm) continue;
+      if (!coverage.has(norm)) coverage.set(norm, new Set());
+      coverage.get(norm)!.add(item.sourceId);
+    }
 
     // ---- Pass 1: de-dupe + score, collect surviving candidates -------------
     for (const item of items) {
@@ -96,7 +111,8 @@ export class Pipeline {
       if (norm) seenThisRun.add(norm);
 
       // Score + filter.
-      const score = scoreItem(item, this.weights[item.sourceId] ?? 0);
+      const crossSourceCount = norm ? (coverage.get(norm)?.size ?? 1) : 1;
+      const score = scoreItem(item, this.weights[item.sourceId] ?? 0, { crossSourceCount });
       if (score.priority === 'REJECT') {
         stats.rejected++;
         const rec = makeRecord(item, 'rejected', {
@@ -171,6 +187,6 @@ export class Pipeline {
   }
 }
 
-export function buildPipeline(sender?: TelegramSender): Pipeline {
-  return new Pipeline(sender);
+export function buildPipeline(sender?: TelegramSender, drafts?: DraftStore): Pipeline {
+  return new Pipeline(sender, drafts);
 }

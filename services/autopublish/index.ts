@@ -52,6 +52,8 @@ export interface AutopublishState {
   lastPublishAt: string | null;
   lastError: string | null;
   consecutiveFailures: number;
+  /** Idempotency key of the last published news slot, e.g. "2026-06-11#1". */
+  lastNewsSlot: string | null;
 }
 
 const DEFAULTS: AutopublishState = {
@@ -62,6 +64,7 @@ const DEFAULTS: AutopublishState = {
   lastPublishAt: null,
   lastError: null,
   consecutiveFailures: 0,
+  lastNewsSlot: null,
 };
 
 export class AutopublishStore {

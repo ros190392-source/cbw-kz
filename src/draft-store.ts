@@ -13,10 +13,12 @@ import { logger } from './logger';
  */
 export class DraftStore {
   private file: string;
+  private dir: string;
   private records: Record<string, DraftRecord> = {};
 
-  constructor(fileName = 'drafts.json') {
-    this.file = path.join(config.paths.data, fileName);
+  constructor(fileName = 'drafts.json', dataDir?: string) {
+    this.dir = dataDir ?? config.paths.data;
+    this.file = path.join(this.dir, fileName);
     this.load();
   }
 
@@ -33,7 +35,7 @@ export class DraftStore {
 
   private save(): void {
     try {
-      if (!fs.existsSync(config.paths.data)) fs.mkdirSync(config.paths.data, { recursive: true });
+      if (!fs.existsSync(this.dir)) fs.mkdirSync(this.dir, { recursive: true });
       fs.writeFileSync(this.file, JSON.stringify(this.records, null, 2));
     } catch (err) {
       logger.error('drafts', `Failed to persist drafts: ${(err as Error).message}`);

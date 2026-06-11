@@ -152,6 +152,7 @@ import { DraftType, GuideTopic } from '../../src/types';
 import { logger } from '../../src/logger';
 import http from 'http';
 import { AutopublishStore, autopublishTick } from '../../services/autopublish';
+import { newsAutopublishTick } from '../../services/autopublish/news';
 import { formatAutopublishToggle, formatAutopublishStatus } from '../../services/autopublish/format';
 
 /**
@@ -183,8 +184,11 @@ async function main() {
 
   const bot = new TelegramBot(config.telegram.botToken, { polling: true });
   const sender = new TelegramSender(bot, config.telegram.moderationChatId);
-  const pipeline = buildPipeline(sender);
+  // One shared DraftStore: the pipeline writes new drafts, the bot's Approve
+  // flow and the news autopublish lane read/update the SAME live copy (a
+  // second instance would go stale and risk duplicate publishes).
   const drafts = new DraftStore();
+  const pipeline = buildPipeline(sender, drafts);
   const analytics = new AnalyticsStore();
   const exchanges = new ExchangeRegistry();
   const bonuses = new BonusStore();
@@ -952,10 +956,12 @@ async function main() {
   // /autopublish_status — show current autopublish state
   bot.onText(/\/autopublish_status\b/, (msg) => {
     if (!reportGate(msg)) return;
-    void sendHtml(msg.chat.id, formatAutopublishStatus(autopublish.get()));
+    void sendHtml(msg.chat.id, formatAutopublishStatus(autopublish.get(), config.autopublish.mode));
   });
 
   // Autopublish tick: 60s interval, idempotent, guarded against overlapping ticks.
+  // Mode 'news' (default) runs the global news lane (EPIC 021); mode 'roadmap'
+  // runs the legacy KZ education lane (EPIC 020).
   let tickInFlight = false;
   const autopublishNotify = (text: string) =>
     config.telegram.moderationChatId
@@ -965,13 +971,22 @@ async function main() {
   setInterval(() => {
     if (tickInFlight) return;
     tickInFlight = true;
-    autopublishTick({
-      store: channelPosts,
-      autopublish,
-      bot,
-      channelId: config.telegram.channelId,
-      notify: autopublishNotify,
-    })
+    const tick = config.autopublish.mode === 'news'
+      ? newsAutopublishTick({
+          drafts,
+          autopublish,
+          bot,
+          channelId: config.telegram.channelId,
+          notify: autopublishNotify,
+        })
+      : autopublishTick({
+          store: channelPosts,
+          autopublish,
+          bot,
+          channelId: config.telegram.channelId,
+          notify: autopublishNotify,
+        });
+    tick
       .catch(err => logger.error('autopublish', `Tick error: ${(err as Error).message}`))
       .finally(() => { tickInFlight = false; });
   }, 60_000);

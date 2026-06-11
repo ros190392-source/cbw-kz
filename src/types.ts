@@ -45,8 +45,8 @@ export type Priority = 'HIGH' | 'MEDIUM' | 'LOW' | 'REJECT';
 export interface ScoreResult {
   /** 0-25: global crypto importance. */
   importance_score: number;
-  /** 0-25: Kazakhstan relevance. */
-  kz_relevance_score: number;
+  /** 0-25: popularity proxy — freshness + cross-source coverage. */
+  popularity_score: number;
   /** 0-20: exchange / bonus / campaign relevance (CBW monetization). */
   exchange_bonus_score: number;
   /** 0-20: actionable value to the reader. */
