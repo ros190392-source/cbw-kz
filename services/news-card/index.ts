@@ -2,6 +2,9 @@ import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
 import { logger } from '../../src/logger';
+import { DetectedCountry } from './country';
+
+export { detectCountry, DetectedCountry } from './country';
 
 /**
  * News card generator (EPIC 021 — global news channel).
@@ -23,6 +26,8 @@ export const CARD_H = 720;
 export const WATERMARK_TEXT = process.env.BRAND_WATERMARK || 'CryptoBonusWorld.com';
 
 const DEFAULT_OUT_DIR = path.resolve(process.cwd(), 'assets', 'news-cards');
+/** One-time AI-generated category backgrounds live here (bg_<key>.png). */
+const DEFAULT_BG_DIR = path.resolve(process.cwd(), 'assets', 'news-bgs');
 
 // ── Category accents ────────────────────────────────────────────────────────
 
@@ -47,6 +52,20 @@ const ACCENTS: Record<string, Accent> = {
 
 export function accentFor(category: string | null): Accent {
   return ACCENTS[category ?? 'Global'] ?? ACCENTS.Global;
+}
+
+/** Filename key for a category's background, e.g. "bitcoin" → bg_bitcoin.png. */
+export function bgKeyFor(category: string | null): string {
+  const c = category ?? 'Global';
+  return (ACCENTS[c] ? c : 'Global').toLowerCase();
+}
+
+/** Resolve the AI background for a category, or null if not generated yet. */
+export function bgPathFor(category: string | null, bgDir: string = DEFAULT_BG_DIR): string | null {
+  const p = path.join(bgDir, `bg_${bgKeyFor(category)}.png`);
+  if (fs.existsSync(p)) return p;
+  const fallback = path.join(bgDir, 'bg_global.png');
+  return fs.existsSync(fallback) ? fallback : null;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -93,6 +112,34 @@ export interface NewsCardInput {
   category: string | null;
   source: string;
   publishDate: string; // ISO
+  /** Country the story is about (flag badge top-right); null/omitted = none. */
+  country?: DetectedCountry | null;
+}
+
+// ── Flag badge ──────────────────────────────────────────────────────────────
+
+const FLAG_DIR = path.resolve(process.cwd(), 'node_modules', 'flag-icons', 'flags', '4x3');
+const FLAG_W = 168;
+const FLAG_H = 126;
+
+/** Flag badge geometry on the card (top-right corner). */
+function flagRect(W: number): { x: number; y: number; w: number; h: number; r: number } {
+  return { x: W - Math.round(W * 0.06) - FLAG_W, y: Math.round(CARD_H * 0.075), w: FLAG_W, h: FLAG_H, r: 16 };
+}
+
+/** Render the country flag as a rounded-corner PNG buffer, or null if unknown. */
+async function flagBuffer(iso: string): Promise<Buffer | null> {
+  const svgPath = path.join(FLAG_DIR, `${iso}.svg`);
+  if (!fs.existsSync(svgPath)) return null;
+  const { w, h, r } = { ...flagRect(CARD_W) };
+  const mask = Buffer.from(
+    `<svg width="${w}" height="${h}"><rect width="${w}" height="${h}" rx="${r}" fill="#fff"/></svg>`,
+  );
+  return sharp(svgPath)
+    .resize(w, h, { fit: 'cover' })
+    .composite([{ input: mask, blend: 'dest-in' }])
+    .png()
+    .toBuffer();
 }
 
 export interface NewsCardResult {
@@ -107,7 +154,7 @@ export interface NewsCardResult {
 export async function renderNewsCard(
   id: string,
   input: NewsCardInput,
-  opts: { outDir?: string; watermark?: string } = {},
+  opts: { outDir?: string; watermark?: string; bgDir?: string } = {},
 ): Promise<NewsCardResult> {
   const outDir = opts.outDir ?? DEFAULT_OUT_DIR;
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
@@ -118,6 +165,7 @@ export async function renderNewsCard(
   const H = CARD_H;
   const accent = accentFor(input.category);
   const x = Math.round(W * 0.06);
+  const bgPath = bgPathFor(input.category, opts.bgDir);
 
   // Headline: up to 4 lines, font scales down for long titles.
   const lines = wrapHeadline(input.title, 26, 4);
@@ -139,6 +187,80 @@ export async function renderNewsCard(
   const footY = Math.round(H * 0.88);
   const footFs = Math.round(W / 44);
 
+  // Shared text layer: accent edge, chip, headline, footer, watermark.
+  const textLayer = `
+  <!-- accent edge -->
+  <rect x="0" y="0" width="${Math.round(W * 0.006)}" height="${H}" fill="${accent.color}" fill-opacity="0.9"/>
+
+  <!-- category chip -->
+  <rect x="${x}" y="${chipY - chipH + Math.round(chipFs * 0.6)}" width="${chipW}" height="${chipH}" rx="${Math.round(chipH / 2)}" fill="${accent.color}" fill-opacity="0.14" stroke="${accent.color}" stroke-opacity="0.75"/>
+  <text x="${x + chipFs}" y="${chipY}" font-family="Arial, 'Segoe UI', sans-serif" font-size="${chipFs}" font-weight="700" letter-spacing="2" fill="${accent.color}">${esc(chipText)}</text>
+
+  <!-- headline -->
+  ${titleSvg}
+
+  <!-- footer rule + source/date -->
+  <rect x="${x}" y="${footY - Math.round(footFs * 1.8)}" width="${Math.round(W * 0.075)}" height="4" rx="2" fill="#E7B53C"/>
+  <text x="${x}" y="${footY}" font-family="Arial, 'Segoe UI', sans-serif" font-size="${footFs}" font-weight="600" fill="#C8D0DC">${esc(input.source)}${input.publishDate ? `  ·  ${esc(fmtDate(input.publishDate))}` : ''}</text>
+
+  ${watermarkSvg(W, H, opts.watermark ?? WATERMARK_TEXT)}`;
+
+  // Flag badge layers (optional): soft shadow goes UNDER the flag (into the
+  // text layer), the gold frame goes ON TOP of the composited flag PNG.
+  const fr = flagRect(W);
+  const flagPng = input.country ? await flagBuffer(input.country.iso) : null;
+  const flagShadow = flagPng
+    ? `<rect x="${fr.x - 4}" y="${fr.y + 6}" width="${fr.w + 8}" height="${fr.h + 8}" rx="${fr.r + 4}" fill="#000000" fill-opacity="0.45"/>`
+    : '';
+  const flagFrame = flagPng
+    ? Buffer.from(
+        `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">` +
+        `<rect x="${fr.x - 2}" y="${fr.y - 2}" width="${fr.w + 4}" height="${fr.h + 4}" rx="${fr.r + 2}" fill="none" stroke="#E7B53C" stroke-width="3" stroke-opacity="0.95"/>` +
+        `<rect x="${fr.x}" y="${fr.y}" width="${fr.w}" height="${fr.h}" rx="${fr.r}" fill="none" stroke="#000000" stroke-width="1" stroke-opacity="0.35"/>` +
+        `</svg>`,
+      )
+    : null;
+  const flagComposites = flagPng && flagFrame
+    ? [
+        { input: flagPng, top: fr.y, left: fr.x },
+        { input: flagFrame, top: 0, left: 0 },
+      ]
+    : [];
+
+  if (bgPath) {
+    // AI background: photo resized to cover, then a legibility scrim (darker on
+    // the left where the headline sits, darker at the bottom for the footer),
+    // then the text layer.
+    const overlay = `
+<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="scrimL" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#080b11" stop-opacity="0.93"/>
+      <stop offset="38%" stop-color="#080b11" stop-opacity="0.82"/>
+      <stop offset="65%" stop-color="#080b11" stop-opacity="0.38"/>
+      <stop offset="100%" stop-color="#080b11" stop-opacity="0.12"/>
+    </linearGradient>
+    <linearGradient id="scrimB" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#080b11" stop-opacity="0"/>
+      <stop offset="78%" stop-color="#080b11" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#080b11" stop-opacity="0.75"/>
+    </linearGradient>
+  </defs>
+  <rect width="${W}" height="${H}" fill="url(#scrimL)"/>
+  <rect width="${W}" height="${H}" fill="url(#scrimB)"/>
+  ${flagShadow}
+  ${textLayer}
+</svg>`;
+    await sharp(bgPath)
+      .resize(W, H, { fit: 'cover', position: 'centre' })
+      .composite([{ input: Buffer.from(overlay), top: 0, left: 0 }, ...flagComposites])
+      .png()
+      .toFile(filePath);
+    logger.info('news-card', `Rendered card ${filename} (${input.category ?? 'Global'}, AI bg${input.country ? `, flag ${input.country.iso}` : ''})`);
+    return { filePath, filename };
+  }
+
+  // Fallback: pure-SVG premium gradient (no AI background generated yet).
   const svg = `
 <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -164,25 +286,16 @@ export async function renderNewsCard(
   <!-- subtle grid texture -->
   ${Array.from({ length: 7 }, (_, i) => `<line x1="${(i + 1) * (W / 8)}" y1="0" x2="${(i + 1) * (W / 8)}" y2="${H}" stroke="#FFFFFF" stroke-opacity="0.022"/>`).join('')}
 
-  <!-- accent edge -->
-  <rect x="0" y="0" width="${Math.round(W * 0.006)}" height="${H}" fill="${accent.color}" fill-opacity="0.9"/>
-
-  <!-- category chip -->
-  <rect x="${x}" y="${chipY - chipH + Math.round(chipFs * 0.6)}" width="${chipW}" height="${chipH}" rx="${Math.round(chipH / 2)}" fill="${accent.color}" fill-opacity="0.14" stroke="${accent.color}" stroke-opacity="0.75"/>
-  <text x="${x + chipFs}" y="${chipY}" font-family="Arial, 'Segoe UI', sans-serif" font-size="${chipFs}" font-weight="700" letter-spacing="2" fill="${accent.color}">${esc(chipText)}</text>
-
-  <!-- headline -->
-  ${titleSvg}
-
-  <!-- footer rule + source/date -->
-  <rect x="${x}" y="${footY - Math.round(footFs * 1.8)}" width="${Math.round(W * 0.075)}" height="4" rx="2" fill="#E7B53C"/>
-  <text x="${x}" y="${footY}" font-family="Arial, 'Segoe UI', sans-serif" font-size="${footFs}" font-weight="600" fill="#C8D0DC">${esc(input.source)}${input.publishDate ? `  ·  ${esc(fmtDate(input.publishDate))}` : ''}</text>
-
-  ${watermarkSvg(W, H, opts.watermark ?? WATERMARK_TEXT)}
+  ${flagShadow}
+  ${textLayer}
 </svg>`;
 
-  await sharp(Buffer.from(svg)).png().toFile(filePath);
-  logger.info('news-card', `Rendered card ${filename} (${input.category ?? 'Global'})`);
+  if (flagComposites.length) {
+    await sharp(Buffer.from(svg)).composite(flagComposites).png().toFile(filePath);
+  } else {
+    await sharp(Buffer.from(svg)).png().toFile(filePath);
+  }
+  logger.info('news-card', `Rendered card ${filename} (${input.category ?? 'Global'}${input.country ? `, flag ${input.country.iso}` : ''})`);
   return { filePath, filename };
 }
 

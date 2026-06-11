@@ -21,7 +21,7 @@ export function formatAutopublishToggle(state: AutopublishState, action: 'enable
     `At: ${shortDate(state.enabledAt)}`,
     '',
     action === 'enabled'
-      ? 'The scheduler will publish one post per day at the scheduled KZ time.'
+      ? 'Autonomous publishing is ON — posts go out at the scheduled slots.'
       : 'Automatic publishing is OFF. Use /autopublish_on to re-enable.',
     '',
     'Manual /approve_publish still works independently.',
