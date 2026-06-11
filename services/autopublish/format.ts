@@ -28,18 +28,20 @@ export function formatAutopublishToggle(state: AutopublishState, action: 'enable
   ].join('\n');
 }
 
-export function formatAutopublishStatus(state: AutopublishState): string {
+export function formatAutopublishStatus(state: AutopublishState, mode?: string): string {
   const icon = state.enabled ? '🟢' : '🔴';
   const lines = [
     `${icon} <b>Autopublish status</b>`,
     '',
     `Enabled: <b>${state.enabled ? 'YES' : 'NO'}</b>`,
+    mode ? `Mode: <b>${esc(mode)}</b>${mode === 'news' ? ' (slots 08:00 / 13:00 / 18:00 UTC)' : ''}` : '',
     `Set by: ${esc(state.enabledBy ?? '—')}`,
     `Set at: ${shortDate(state.enabledAt)}`,
     '',
     `Last tick: ${shortDate(state.lastTickAt)}`,
     `Last publish: ${shortDate(state.lastPublishAt)}`,
-  ];
+    state.lastNewsSlot ? `Last news slot: ${esc(state.lastNewsSlot)}` : '',
+  ].filter(Boolean);
 
   if (state.consecutiveFailures > 0) {
     lines.push(`⚠️ Consecutive failures: ${state.consecutiveFailures}`);
