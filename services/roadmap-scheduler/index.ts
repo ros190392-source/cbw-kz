@@ -458,10 +458,14 @@ export function isHighRiskEntry(entry: RoadmapEntry): boolean {
 
 /**
  * Auto-publish pre-condition check (CONTENT_ROADMAP §10).
- * Currently ALWAYS false — auto-publish is OFF by default.
+ * Returns false unless the autopublish toggle is explicitly enabled.
+ * Even when enabled, high-risk topics with weak evidence are blocked.
  */
-export function canAutoPublish(_entry: RoadmapEntry): boolean {
-  return false;
+export function canAutoPublish(entry: RoadmapEntry, autopublishEnabled: boolean = false): boolean {
+  if (!autopublishEnabled) return false;
+  if (entry.highRisk) return false;
+  if (entry.evidenceLevel === 'D' || entry.evidenceLevel === 'E') return false;
+  return true;
 }
 
 // ── Report ─────────────────────────────────────────────────────────────────

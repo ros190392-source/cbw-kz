@@ -151,6 +151,8 @@ import {
 import { DraftType, GuideTopic } from '../../src/types';
 import { logger } from '../../src/logger';
 import http from 'http';
+import { AutopublishStore, autopublishTick } from '../../services/autopublish';
+import { formatAutopublishToggle, formatAutopublishStatus } from '../../services/autopublish/format';
 
 /**
  * Long-running Telegram bot — the main runtime for Phase 01.
@@ -206,6 +208,7 @@ async function main() {
   const submissions = new SubmissionStore();
   testers.seed(); // honest example testers on first run (idempotent)
   const channelPosts = new ChannelPostStore();
+  const autopublish = new AutopublishStore();
   let lastPipelineRun: string | null = null;
   let lastError: string | null = null;
 
@@ -263,7 +266,7 @@ async function main() {
         `This chat id: <code>${msg.chat.id}</code>`,
         '',
         'Set <code>TELEGRAM_MODERATION_CHAT_ID</code> to this id in your .env to receive drafts here.',
-        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence, /locales, /plan, /weekplan, /backlog, /research, /trends, /discoveries, /signals, /insights, /suggestions, /learn, /queue, /queue_add, /review, /next, /draft, /outline, /seo, /localized, /operator, /today, /blocked, /health, /health_runtime, /backup, /runtime_status, /merge_guardian, /pr_risk, /safe_to_merge, /evidence_levels, /screenshots, /missing_evidence, /manual_trust, /next_post, /plan_week, /sched_queue, /generate_next, /schedule_post, /scheduler_report',
+        'Commands: /status, /run, /report, /weekly, /top, /exchanges, /bonuses, /launchpool, /geo kz, /verify, /confidence, /stale, /evidence, /locales, /plan, /weekplan, /backlog, /research, /trends, /discoveries, /signals, /insights, /suggestions, /learn, /queue, /queue_add, /review, /next, /draft, /outline, /seo, /localized, /operator, /today, /blocked, /health, /health_runtime, /backup, /runtime_status, /merge_guardian, /pr_risk, /safe_to_merge, /evidence_levels, /screenshots, /missing_evidence, /manual_trust, /next_post, /plan_week, /sched_queue, /generate_next, /schedule_post, /scheduler_report, /autopublish_on, /autopublish_off, /autopublish_status',
       ].join('\n'),
       { parse_mode: 'HTML' },
     );
@@ -927,6 +930,51 @@ async function main() {
     if (!reportGate(msg)) return;
     void sendHtml(msg.chat.id, formatSchedulerReport(schedulerReport(channelPosts.all())));
   });
+
+  // ── Autopublish (EPIC 020). Toggle-controlled autonomous daily publishing. ──
+
+  // /autopublish_on — enable autonomous publishing
+  bot.onText(/\/autopublish_on\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    const by = msg.from?.username ?? String(msg.from?.id ?? 'admin');
+    const state = autopublish.enable(by);
+    void sendHtml(msg.chat.id, formatAutopublishToggle(state, 'enabled'));
+  });
+
+  // /autopublish_off — disable autonomous publishing
+  bot.onText(/\/autopublish_off\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    const by = msg.from?.username ?? String(msg.from?.id ?? 'admin');
+    const state = autopublish.disable(by);
+    void sendHtml(msg.chat.id, formatAutopublishToggle(state, 'disabled'));
+  });
+
+  // /autopublish_status — show current autopublish state
+  bot.onText(/\/autopublish_status\b/, (msg) => {
+    if (!reportGate(msg)) return;
+    void sendHtml(msg.chat.id, formatAutopublishStatus(autopublish.get()));
+  });
+
+  // Autopublish tick: 60s interval, idempotent, guarded against overlapping ticks.
+  let tickInFlight = false;
+  const autopublishNotify = (text: string) =>
+    config.telegram.moderationChatId
+      ? bot.sendMessage(config.telegram.moderationChatId, text, { parse_mode: 'HTML' }).then(() => undefined)
+      : Promise.resolve();
+
+  setInterval(() => {
+    if (tickInFlight) return;
+    tickInFlight = true;
+    autopublishTick({
+      store: channelPosts,
+      autopublish,
+      bot,
+      channelId: config.telegram.channelId,
+      notify: autopublishNotify,
+    })
+      .catch(err => logger.error('autopublish', `Tick error: ${(err as Error).message}`))
+      .finally(() => { tickInFlight = false; });
+  }, 60_000);
 
   // /image_prompts — show the premium image prompts + configured provider.
   bot.onText(/\/image_prompts\b/, (msg) => {
