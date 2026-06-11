@@ -59,4 +59,60 @@ export const SOURCES: RssSource[] = [
     enabled: true,
     weight: 1,
   },
+
+  // ---------------------------------------------------------------------------
+  // EPIC 022 — wider net for the global news channel. More independent feeds
+  // means the cross-source coverage signal actually fires: a story carried by
+  // 3+ of these outlets is genuinely trending, not just one editor's pick.
+  // All verified to serve clean XML server-side (2026-06-11).
+  // ---------------------------------------------------------------------------
+  {
+    id: 'coindesk',
+    name: 'CoinDesk',
+    url: 'https://www.coindesk.com/arc/outboundfeeds/rss',
+    enabled: true,
+    weight: 2,
+  },
+  {
+    id: 'blockworks',
+    name: 'Blockworks',
+    url: 'https://blockworks.com/feed/',
+    enabled: true,
+    weight: 2,
+  },
+  {
+    id: 'dlnews',
+    name: 'DL News',
+    url: 'https://www.dlnews.com/arc/outboundfeeds/rss/',
+    enabled: true,
+    weight: 1,
+  },
+  {
+    id: 'cryptoslate',
+    name: 'CryptoSlate',
+    url: 'https://cryptoslate.com/feed/',
+    enabled: true,
+    weight: 1,
+  },
+  {
+    id: 'thedefiant',
+    name: 'The Defiant',
+    url: 'https://thedefiant.io/api/feed',
+    enabled: true,
+    weight: 1,
+  },
+  {
+    id: 'bitcoinmagazine',
+    name: 'Bitcoin Magazine',
+    url: 'https://bitcoinmagazine.com/feed',
+    enabled: true,
+    weight: 1,
+  },
+  {
+    id: 'utoday',
+    name: 'U.Today',
+    url: 'https://u.today/rss',
+    enabled: true,
+    weight: 0,
+  },
 ];

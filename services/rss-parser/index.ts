@@ -3,7 +3,14 @@ import Parser from 'rss-parser';
 import { NewsItem, RssSource } from '../../src/types';
 import { logger } from '../../src/logger';
 
-const parser = new Parser({ timeout: 15000 });
+// Browser-like UA: some outlets (e.g. Bitcoin Magazine) 403 generic bot agents.
+const parser = new Parser({
+  timeout: 15000,
+  headers: {
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+  },
+});
 
 function makeId(input: string): string {
   return crypto.createHash('sha1').update(input).digest('hex').slice(0, 16);

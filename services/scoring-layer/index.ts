@@ -105,6 +105,8 @@ const PRICE_NOISE: Weighted[] = [
 export interface PopularitySignals {
   /** How many independent sources carried (near-)identical stories this run. */
   crossSourceCount?: number;
+  /** Real engagement heat (0-10) from CryptoPanic votes / Reddit upvotes (EPIC 022). */
+  engagementBoost?: number;
   /** "Now" override for deterministic tests. */
   now?: Date;
 }
@@ -160,8 +162,9 @@ export function scoreItem(
 
   const importance_score = clamp(importance.score, 0, 25);
   const crossSourceCount = signals.crossSourceCount ?? 1;
+  const engagementBoost = clamp(signals.engagementBoost ?? 0, 0, 10);
   const popularity_score = clamp(
-    freshnessScore(item.publishDate, signals.now) + coverageScore(crossSourceCount),
+    freshnessScore(item.publishDate, signals.now) + coverageScore(crossSourceCount) + engagementBoost,
     0,
     25,
   );
@@ -194,15 +197,18 @@ export function scoreItem(
     priority = 'REJECT';
     reason = `low-signal (score ${score_total} < ${REJECT_FLOOR})`;
   } else {
-    // Trending coverage and strong bonus signals are floors — CBW priorities.
-    if (crossSourceCount >= 3 && importance_score >= 8) score_total = Math.max(score_total, 70);
-    else if (exchange_bonus_score >= 16) score_total = Math.max(score_total, 65);
+    // Trending coverage, hot engagement and strong bonus signals are floors.
+    if ((crossSourceCount >= 3 || engagementBoost >= 7) && importance_score >= 8) {
+      score_total = Math.max(score_total, 70);
+    } else if (exchange_bonus_score >= 16) {
+      score_total = Math.max(score_total, 65);
+    }
 
     if (score_total >= 65) priority = 'HIGH';
     else if (score_total >= 45) priority = 'MEDIUM';
     else priority = 'LOW';
 
-    reason = buildReason(category, crossSourceCount, [...exch.matched, ...bonus.matched], importance.matched, hypeHits);
+    reason = buildReason(category, crossSourceCount, engagementBoost, [...exch.matched, ...bonus.matched], importance.matched, hypeHits);
   }
 
   return {
@@ -221,12 +227,14 @@ export function scoreItem(
 function buildReason(
   category: string,
   crossSourceCount: number,
+  engagementBoost: number,
   exBonusMatched: string[],
   importanceMatched: string[],
   hypeHits: number,
 ): string {
   const parts: string[] = [];
   if (crossSourceCount >= 2) parts.push(`trending — covered by ${crossSourceCount} sources`);
+  if (engagementBoost >= 4) parts.push(`hot on socials (engagement ${engagementBoost}/10)`);
   if (exBonusMatched.length) parts.push(`exchange/bonus signal (${exBonusMatched.slice(0, 3).join(', ')}) — CBW monetization`);
   if (importanceMatched.length) parts.push(`global importance (${importanceMatched.slice(0, 3).join(', ')})`);
   if (!parts.length) parts.push('general crypto news');
