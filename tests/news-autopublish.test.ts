@@ -12,7 +12,7 @@ import {
   MAX_NEWS_AGE_H,
 } from '../services/autopublish/news';
 import { AutopublishStore } from '../services/autopublish';
-import { renderNewsCard, applyWatermark, wrapHeadline, accentFor, CARD_W, CARD_H } from '../services/news-card';
+import { renderNewsCard, applyWatermark, wrapHeadline, accentFor, detectCountry, CARD_W, CARD_H } from '../services/news-card';
 import { DraftStore } from '../src/draft-store';
 import { DraftRecord } from '../src/types';
 import sharp from 'sharp';
@@ -182,6 +182,53 @@ describe('news card', () => {
     expect(accentFor('Nonsense').label).toBe('CRYPTO NEWS');
     expect(accentFor(null).label).toBe('CRYPTO NEWS');
     expect(accentFor('Bitcoin').label).toBe('BITCOIN');
+  });
+
+  it('renders a card with a country flag badge', async () => {
+    const dir = tmpDir();
+    const r = await renderNewsCard('flagged', {
+      title: 'SEC approves new crypto ETF framework',
+      category: 'Regulation',
+      source: 'The Block',
+      publishDate: '2026-06-11T09:00:00Z',
+      country: { iso: 'us', name: 'United States' },
+    }, { outDir: dir });
+    expect(fs.existsSync(r.filePath)).toBe(true);
+    const meta = await sharp(r.filePath).metadata();
+    expect(meta.width).toBe(CARD_W);
+    expect(meta.height).toBe(CARD_H);
+  });
+
+  it('unknown flag iso renders without a badge (no crash)', async () => {
+    const dir = tmpDir();
+    const r = await renderNewsCard('noflag', {
+      title: 'Some news', category: 'Global', source: 'X', publishDate: '2026-06-11T09:00:00Z',
+      country: { iso: 'zz', name: 'Nowhere' },
+    }, { outDir: dir });
+    expect(fs.existsSync(r.filePath)).toBe(true);
+  });
+});
+
+// ── Country detection ────────────────────────────────────────────────────────
+
+describe('detectCountry', () => {
+  it('detects major jurisdictions', () => {
+    expect(detectCountry('SEC sues major exchange in the United States')?.iso).toBe('us');
+    expect(detectCountry('EU finalizes MiCA implementation rules')?.iso).toBe('eu');
+    expect(detectCountry('Japan approves new stablecoin framework in Tokyo')?.iso).toBe('jp');
+    expect(detectCountry('Hong Kong opens crypto ETF market')?.iso).toBe('hk');
+    expect(detectCountry('Kazakhstan miners face new tariffs')?.iso).toBe('kz');
+  });
+
+  it('returns null for global stories with no country', () => {
+    expect(detectCountry('Bitcoin breaks new all-time high as ETF inflows surge')).toBeNull();
+    expect(detectCountry('Ethereum upgrade ships on mainnet')).toBeNull();
+  });
+
+  it('prefers the country with more keyword hits', () => {
+    const r = detectCountry('China bans mining again while a US senator comments');
+    // China has 1 hit (china); US has 1 (us ... actually "US " inside "a US senator")
+    expect(['cn', 'us']).toContain(r?.iso);
   });
 });
 

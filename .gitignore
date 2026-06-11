@@ -12,3 +12,5 @@ logs/*.log
 # backups + PM2 runtime artifacts (EPIC 011)
 backups/
 .pm2/
+
+assets/news-cards/

@@ -1,7 +1,7 @@
 import { DraftStore } from '../../src/draft-store';
 import { DraftRecord } from '../../src/types';
 import { SenderBot, validateContentSafety } from '../content-center';
-import { renderNewsCard } from '../news-card';
+import { renderNewsCard, detectCountry } from '../news-card';
 import { AutopublishStore } from './index';
 import { logger } from '../../src/logger';
 
@@ -137,6 +137,7 @@ export async function newsAutopublishTick(ctx: NewsTickContext): Promise<NewsTic
       category: rec.category,
       source: rec.source,
       publishDate: rec.publishDate,
+      country: detectCountry(`${rec.title} ${rec.text}`),
     }, { outDir: ctx.cardDir });
 
     const caption = buildNewsCaption(rec);
