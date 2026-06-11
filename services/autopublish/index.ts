@@ -316,7 +316,7 @@ export async function autopublishTick(ctx: TickContext): Promise<TickResult> {
       return { action: 'publish_failed', postId: post.id, error: res.error ?? undefined };
     }
 
-    ctx.store.markPublished(post.id, 'autopublish', res.messageId!);
+    ctx.store.markPublished(post.id, 'autopublish', res.messageId!, now);
     ctx.autopublish.updateTick({
       lastPublishAt: now.toISOString(),
       lastError: null,
