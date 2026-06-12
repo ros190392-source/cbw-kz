@@ -153,6 +153,7 @@ import { logger } from '../../src/logger';
 import http from 'http';
 import { AutopublishStore, autopublishTick } from '../../services/autopublish';
 import { newsAutopublishTick } from '../../services/autopublish/news';
+import { promoAutopublishTick } from '../../services/autopublish/promo';
 import { formatAutopublishToggle, formatAutopublishStatus } from '../../services/autopublish/format';
 
 /**
@@ -978,7 +979,12 @@ async function main() {
           bot,
           channelId: config.telegram.channelId,
           notify: autopublishNotify,
-        })
+        }).then(() => promoAutopublishTick({
+          autopublish,
+          bot,
+          channelId: config.telegram.channelId,
+          notify: autopublishNotify,
+        })).then(() => undefined)
       : autopublishTick({
           store: channelPosts,
           autopublish,
