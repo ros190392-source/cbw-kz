@@ -979,6 +979,7 @@ async function main() {
           bot,
           channelId: config.telegram.channelId,
           notify: autopublishNotify,
+          banner: true,
         }).then(() => promoAutopublishTick({
           autopublish,
           bot,

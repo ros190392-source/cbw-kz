@@ -3,6 +3,7 @@ import { DraftRecord } from '../../src/types';
 import { SenderBot, validateContentSafety } from '../content-center';
 import { renderNewsCard, detectCountry } from '../news-card';
 import { buildFunnelFooter, detectExchange } from '../funnel';
+import { renderBrandedBanner } from '../promo-radar/banner';
 import { AutopublishStore } from './index';
 import { logger } from '../../src/logger';
 
@@ -119,6 +120,12 @@ export interface NewsTickContext {
   /** Where rendered cards are written (tests override). */
   cardDir?: string;
   notify?: (text: string) => Promise<void>;
+  /**
+   * Use the source article's own og:image (in CBW gold framing) for exchange
+   * stories instead of the AI card. Opt-in (the bot enables it); tests and
+   * offline runs keep the deterministic card path.
+   */
+  banner?: boolean;
 }
 
 export type NewsTickAction =
@@ -158,16 +165,28 @@ export async function newsAutopublishTick(ctx: NewsTickContext): Promise<NewsTic
   if (!rec) return { action: 'no_eligible_news', slotKey: key };
 
   try {
-    const card = await renderNewsCard(rec.id, {
-      title: rec.title,
-      category: rec.category,
-      source: rec.source,
-      publishDate: rec.publishDate,
-      country: detectCountry(`${rec.title} ${rec.text}`),
-    }, { outDir: ctx.cardDir });
+    // Exchange stories: prefer the source article's own image in CBW gold
+    // framing (the source is credited in the caption); fail-open to our card.
+    let imagePath: string | null = null;
+    if (ctx.banner === true && isExchangeStory(`${rec.title} ${rec.text}`)) {
+      imagePath = await renderBrandedBanner(`news-${rec.id}`, rec.link, {
+        outDir: ctx.cardDir,
+        label: 'EXCHANGE NEWS',
+      });
+    }
+    if (!imagePath) {
+      const card = await renderNewsCard(rec.id, {
+        title: rec.title,
+        category: rec.category,
+        source: rec.source,
+        publishDate: rec.publishDate,
+        country: detectCountry(`${rec.title} ${rec.text}`),
+      }, { outDir: ctx.cardDir });
+      imagePath = card.filePath;
+    }
 
     const caption = buildNewsCaption(rec);
-    const msg = await ctx.bot.sendPhoto(ctx.channelId, card.filePath, { caption });
+    const msg = await ctx.bot.sendPhoto(ctx.channelId, imagePath, { caption });
 
     const at = now.toISOString();
     ctx.drafts.update(rec.id, {
