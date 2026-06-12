@@ -67,8 +67,12 @@ export function isRewardPromo(title: string): boolean {
  */
 const EXCLUDE_SIGNALS = ['exclusive country', 'exclusive region', 'selected countries', 'vip only', 'vip-only'];
 
+/** Bracketed exclusivity tags: "[Vietnam Exclusive]", "[MENA exclusive]", … */
+const BRACKET_EXCLUSIVE = /\[[^\]]*\bexclusive\b[^\]]*\]/i;
+
 export function isGlobalPromo(title: string): boolean {
   const t = title.toLowerCase();
+  if (BRACKET_EXCLUSIVE.test(title)) return false;
   return !EXCLUDE_SIGNALS.some((kw) => t.includes(kw));
 }
 

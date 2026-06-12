@@ -8,7 +8,11 @@ import {
   buildPromoCaption,
   promoAutopublishTick,
   POSTED_URLS_CAP,
+  isSpotlightDay,
+  buildSpotlightCaption,
 } from '../services/autopublish/promo';
+import { isExchangeStory } from '../services/autopublish/news';
+import { looksGeneric, frameOverlaySvg } from '../services/promo-radar/banner';
 import { AutopublishStore } from '../services/autopublish';
 import { PromoItem } from '../services/promo-radar';
 
@@ -59,6 +63,7 @@ function ctx(opts: {
     now: opts.now ?? SLOT_NOW,
     cardDir: dir,
     collect: async () => opts.promos ?? [promo()],
+    banner: false, // no live og:image fetching in tests
   };
 }
 
@@ -112,6 +117,58 @@ describe('buildPromoCaption', () => {
     expect(c.length).toBeLessThanOrEqual(1024);
     expect(c).toContain('…');
     expect(c).toContain('cryptobonusworld.com'); // footer survived the trim
+  });
+});
+
+// ── Exchange-first pivot (EPIC 025) ─────────────────────────────────────────
+
+describe('isSpotlightDay', () => {
+  it('is true only on Sundays (UTC)', () => {
+    expect(isSpotlightDay(new Date('2026-06-14T15:30:00Z'))).toBe(true); // Sun
+    expect(isSpotlightDay(new Date('2026-06-12T15:30:00Z'))).toBe(false); // Fri
+    expect(isSpotlightDay(new Date('2026-06-15T15:30:00Z'))).toBe(false); // Mon
+  });
+});
+
+describe('buildSpotlightCaption', () => {
+  it('promotes the site with UTM and no concrete bonus amounts', () => {
+    const c = buildSpotlightCaption();
+    expect(c).toContain('cryptobonusworld.com/bonuses/?utm_source=telegram');
+    expect(c).not.toMatch(/\$\d/); // honesty: no amounts in ads
+    expect(c.length).toBeLessThanOrEqual(1024);
+  });
+});
+
+describe('isExchangeStory', () => {
+  it('matches CBW-listed exchanges', () => {
+    expect(isExchangeStory('Bybit launches new copy trading product')).toBe(true);
+    expect(isExchangeStory('MEXC announces zero-fee week')).toBe(true);
+  });
+
+  it('matches exchange-domain terms and majors without CBW pages', () => {
+    expect(isExchangeStory('Coinbase wins court ruling')).toBe(true);
+    expect(isExchangeStory('Kraken expands into Europe')).toBe(true);
+    expect(isExchangeStory('Major exchange halts withdrawal processing')).toBe(true);
+  });
+
+  it('rejects general macro stories', () => {
+    expect(isExchangeStory('Bitcoin price hits new all-time high')).toBe(false);
+    expect(isExchangeStory('US Senate debates stablecoin bill')).toBe(false);
+  });
+});
+
+describe('banner helpers', () => {
+  it('flags generic logo/placeholder images', () => {
+    expect(looksGeneric('https://x.com/assets/logo.png')).toBe(true);
+    expect(looksGeneric('https://x.com/og-image-default.jpg')).toBe(true);
+    expect(looksGeneric('https://x.com/campaigns/football-2026-banner.jpg')).toBe(false);
+  });
+
+  it('frame overlay carries brand elements', () => {
+    const svg = frameOverlaySvg();
+    expect(svg).toContain('BONUS ALERT');
+    expect(svg).toContain('CryptoBonusWorld.com');
+    expect(svg).toContain('#E7B53C'); // gold
   });
 });
 
@@ -169,6 +226,17 @@ describe('promoAutopublishTick', () => {
     expect(r.action).toBe('publish_failed');
     expect(c.autopublish.get().consecutiveFailures).toBe(1);
     expect(c.autopublish.get().lastPromoSlot).toBeNull(); // retry next tick in window
+  });
+
+  it('posts the site spotlight on Sundays instead of an exchange promo', async () => {
+    const sunday = new Date('2026-06-14T15:30:00Z');
+    const c = ctx({ now: sunday });
+    const r = await promoAutopublishTick(c as any);
+    expect(r.action).toBe('published');
+    expect(r.promoUrl).toContain('cryptobonusworld.com/bonuses');
+    const caption = c.bot.sendPhoto.mock.calls[0][2].caption as string;
+    expect(caption).toContain('CryptoBonusWorld.com');
+    expect(c.autopublish.get().lastPromoSlot).toBe('2026-06-14#promo');
   });
 
   it('caps the dedup list', async () => {

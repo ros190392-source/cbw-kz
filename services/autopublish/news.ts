@@ -2,7 +2,7 @@ import { DraftStore } from '../../src/draft-store';
 import { DraftRecord } from '../../src/types';
 import { SenderBot, validateContentSafety } from '../content-center';
 import { renderNewsCard, detectCountry } from '../news-card';
-import { buildFunnelFooter } from '../funnel';
+import { buildFunnelFooter, detectExchange } from '../funnel';
 import { AutopublishStore } from './index';
 import { logger } from '../../src/logger';
 
@@ -53,8 +53,31 @@ export function newsSlotKey(now: Date, slotIndex: number): string {
 // ── Selection ───────────────────────────────────────────────────────────────
 
 /**
+ * Exchange-first positioning (EPIC 025): the channel is about exchanges —
+ * their news, products, listings, incidents — not general macro. A story
+ * counts as an exchange story when it mentions a CBW-listed exchange or any
+ * clearly exchange-domain term (incl. major exchanges without a CBW page:
+ * exchange news about Coinbase is still exchange news; the footer just
+ * falls back to /bonuses/).
+ */
+const EXCHANGE_TERMS = [
+  'exchange', ' listing', ' lists ', 'delist', 'launchpool', 'launchpad',
+  'airdrop', 'trading fee', 'withdrawal', 'coinbase', 'kraken', 'gate.io',
+  'crypto.com', 'upbit', 'bithumb',
+];
+
+export function isExchangeStory(text: string): boolean {
+  if (detectExchange(text)) return true;
+  const t = ` ${(text ?? '').toLowerCase()} `;
+  return EXCHANGE_TERMS.some((k) => t.includes(k));
+}
+
+/**
  * Pick the best publishable pending draft: fresh (≤ MAX_NEWS_AGE_H), passes
  * the safety validator, highest score first (ties → newer story).
+ *
+ * Exchange stories are preferred outright; the best general story is only a
+ * fallback so a slot is never silently skipped when exchange news is quiet.
  */
 export function selectTopNewsDraft(drafts: DraftRecord[], now: Date = new Date()): DraftRecord | null {
   const cutoff = now.getTime() - MAX_NEWS_AGE_H * 60 * 60 * 1000;
@@ -69,7 +92,8 @@ export function selectTopNewsDraft(drafts: DraftRecord[], now: Date = new Date()
       (b.scoreTotal ?? 0) - (a.scoreTotal ?? 0) ||
       (b.publishDate ?? '').localeCompare(a.publishDate ?? ''),
     );
-  return eligible[0] ?? null;
+  const exchange = eligible.find(d => isExchangeStory(`${d.title} ${d.text}`));
+  return exchange ?? eligible[0] ?? null;
 }
 
 /** Telegram photo-caption limit. */

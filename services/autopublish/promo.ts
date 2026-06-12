@@ -1,7 +1,10 @@
+import fs from 'fs';
+import path from 'path';
 import { SenderBot, validateContentSafety } from '../content-center';
 import { renderNewsCard } from '../news-card';
-import { funnelUrl } from '../funnel';
+import { funnelUrl, SITE_BASE, UTM } from '../funnel';
 import { collectPromos, selectPromo, PromoItem } from '../promo-radar';
+import { renderBrandedBanner } from '../promo-radar/banner';
 import { AutopublishStore } from './index';
 import { logger } from '../../src/logger';
 
@@ -39,6 +42,32 @@ export function promoSlotKey(now: Date): string {
   return `${now.toISOString().slice(0, 10)}#promo`;
 }
 
+// ── Sunday site spotlight ───────────────────────────────────────────────────
+
+/**
+ * Once a week (Sunday's promo slot) the lane posts the site itself instead
+ * of an exchange promo — the channel's own ad. Uses the pre-rendered brand
+ * creative; honest copy, no concrete amounts.
+ */
+export const SPOTLIGHT_CREATIVE = path.join('assets', 'ad-creatives', 'creative_bonus.png');
+
+export function isSpotlightDay(now: Date): boolean {
+  return now.getUTCDay() === 0; // Sunday
+}
+
+export function buildSpotlightCaption(): string {
+  return [
+    '🌍 One site. Every exchange bonus.',
+    '',
+    'CryptoBonusWorld.com tracks signup bonuses, deposit rewards and promo codes across 12+ crypto exchanges — verified and kept up to date.',
+    '',
+    'Stop trading without a bonus.',
+    '',
+    '🎁 Browse all bonuses',
+    `${SITE_BASE}/bonuses/?${UTM}`,
+  ].join('\n');
+}
+
 // ── Caption ─────────────────────────────────────────────────────────────────
 
 const CAPTION_LIMIT = 1024;
@@ -73,6 +102,8 @@ export interface PromoTickContext {
   notify?: (text: string) => Promise<void>;
   /** Test seam: overrides live collection. */
   collect?: () => Promise<PromoItem[]>;
+  /** Test seam: false disables og:image banner fetching. */
+  banner?: boolean;
 }
 
 export type PromoTickAction =
@@ -104,6 +135,24 @@ export async function promoAutopublishTick(ctx: PromoTickContext): Promise<Promo
   const key = promoSlotKey(now);
   if (state.lastPromoSlot === key) return { action: 'already_published_this_slot', slotKey: key };
 
+  // Sunday = site spotlight (the channel's own ad) instead of an exchange promo.
+  const creative = path.resolve(process.cwd(), SPOTLIGHT_CREATIVE);
+  if (isSpotlightDay(now) && fs.existsSync(creative)) {
+    try {
+      const msg = await ctx.bot.sendPhoto(ctx.channelId, creative, { caption: buildSpotlightCaption() });
+      ctx.autopublish.updateTick({ lastPromoSlot: key, lastError: null, consecutiveFailures: 0 });
+      logger.audit('autopublish_promo', `Published site spotlight → msg ${msg.message_id}`, { slot: key });
+      void ctx.notify?.(`✅ Site spotlight published (msg ${msg.message_id})`);
+      return { action: 'published', slotKey: key, promoUrl: `${SITE_BASE}/bonuses/` };
+    } catch (err) {
+      const error = (err as Error).message;
+      ctx.autopublish.updateTick({ lastError: error, consecutiveFailures: state.consecutiveFailures + 1 });
+      logger.error('autopublish_promo', `Spotlight publish failed: ${error}`);
+      void ctx.notify?.(`⚠️ Site spotlight publish failed: ${error}`);
+      return { action: 'publish_failed', slotKey: key, error };
+    }
+  }
+
   let promo: PromoItem | null = null;
   try {
     const promos = await (ctx.collect ?? (() => collectPromos({ now })))();
@@ -121,16 +170,25 @@ export async function promoAutopublishTick(ctx: PromoTickContext): Promise<Promo
   }
 
   try {
-    const card = await renderNewsCard(`promo-${now.getTime()}`, {
-      title: promo.title,
-      category: 'Bonus',
-      source: promo.exchangeName,
-      publishDate: new Date(promo.publishedAt).toISOString(),
-      country: null,
-    }, { outDir: ctx.cardDir });
+    // Prefer the exchange's own campaign banner in CBW framing (EPIC 025);
+    // fall back to our rendered card when the page yields no usable og:image.
+    const cardId = `promo-${now.getTime()}`;
+    let imagePath = ctx.banner === false
+      ? null
+      : await renderBrandedBanner(cardId, promo.url, { outDir: ctx.cardDir });
+    if (!imagePath) {
+      const card = await renderNewsCard(cardId, {
+        title: promo.title,
+        category: 'Bonus',
+        source: promo.exchangeName,
+        publishDate: new Date(promo.publishedAt).toISOString(),
+        country: null,
+      }, { outDir: ctx.cardDir });
+      imagePath = card.filePath;
+    }
 
     const caption = buildPromoCaption(promo, now);
-    const msg = await ctx.bot.sendPhoto(ctx.channelId, card.filePath, { caption });
+    const msg = await ctx.bot.sendPhoto(ctx.channelId, imagePath, { caption });
 
     ctx.autopublish.updateTick({
       lastPromoSlot: key,
