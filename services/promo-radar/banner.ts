@@ -43,7 +43,10 @@ export async function fetchOgImage(pageUrl: string): Promise<string | null> {
 }
 
 /** Banners that are just a logo/placeholder are worse than our own card. */
-const GENERIC_HINTS = ['logo', 'default', 'favicon', 'placeholder', 'og-image-default'];
+const GENERIC_HINTS = [
+  'logo', 'default', 'favicon', 'placeholder', 'og-image-default',
+  '@kudos/runtime', // KuCoin's site-wide brand og:image, not a campaign banner
+];
 
 export function looksGeneric(imageUrl: string): boolean {
   const u = imageUrl.toLowerCase();
