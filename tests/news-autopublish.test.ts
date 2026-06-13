@@ -9,6 +9,8 @@ import {
   selectTopNewsDraft,
   buildNewsCaption,
   newsAutopublishTick,
+  isDuplicateStory,
+  resolveExchangeBrand,
   MAX_NEWS_AGE_H,
 } from '../services/autopublish/news';
 import { AutopublishStore } from '../services/autopublish';
@@ -45,6 +47,7 @@ function fakeDraft(id: string, opts: Partial<DraftRecord> = {}): DraftRecord {
     text: opts.text ?? 'A factual crypto news summary that is safe to publish.',
     status: opts.status ?? 'pending',
     createdAt: opts.createdAt ?? new Date().toISOString(),
+    publishedAt: opts.publishedAt ?? null,
   };
 }
 
@@ -128,6 +131,92 @@ describe('selectTopNewsDraft', () => {
       fakeDraft('newer', { scoreTotal: 50, publishDate: '2026-06-11T11:00:00Z' }),
     ];
     expect(selectTopNewsDraft(drafts, now)?.id).toBe('newer');
+  });
+
+  it('skips a reworded re-run of a story already published days ago', () => {
+    // The real-world miss: same SpaceX story, different source/link/wording,
+    // ~20h apart — must not be re-published.
+    const drafts = [
+      fakeDraft('yesterday', {
+        status: 'published',
+        title: 'Bybit, Binance and Bitget Cancel Tokenized SpaceX Allocations',
+        link: 'https://thedefiant.io/news/cefi/bybit-binance-bitget-cancel',
+        publishedAt: '2026-06-10T17:55:00Z',
+      }),
+      fakeDraft('today', {
+        scoreTotal: 90,
+        title: 'Bybit, Binance, Bitget cancel tokenized SpaceX IPO allocations after some get smoked',
+        link: 'https://www.theblock.co/post/404644/bybit-binance-bitget',
+        publishDate: '2026-06-11T07:00:00Z',
+      }),
+      fakeDraft('other', { scoreTotal: 40, title: 'Kraken adds new staking pairs for EUR users' }),
+    ];
+    expect(selectTopNewsDraft(drafts, now)?.id).toBe('other');
+  });
+
+  it('still allows the same story once the dedup window has passed', () => {
+    const drafts = [
+      fakeDraft('long-ago', {
+        status: 'published',
+        title: 'Bybit, Binance and Bitget Cancel Tokenized SpaceX Allocations',
+        publishedAt: '2026-06-01T00:00:00Z', // > DEDUP_WINDOW_H before `now`
+      }),
+      fakeDraft('again', {
+        scoreTotal: 90,
+        title: 'Bybit, Binance, Bitget cancel tokenized SpaceX IPO allocations',
+        publishDate: '2026-06-11T07:00:00Z',
+      }),
+    ];
+    expect(selectTopNewsDraft(drafts, now)?.id).toBe('again');
+  });
+
+  it('skips an exact re-post of the same source link', () => {
+    const drafts = [
+      fakeDraft('p', {
+        status: 'published',
+        link: 'https://example.com/same',
+        publishedAt: '2026-06-11T06:00:00Z',
+      }),
+      fakeDraft('dup', { scoreTotal: 90, link: 'https://example.com/same', title: 'Totally different headline words here today' }),
+      fakeDraft('fresh', { scoreTotal: 40, title: 'Coinbase rolls out a fee rebate program' }),
+    ];
+    expect(selectTopNewsDraft(drafts, now)?.id).toBe('fresh');
+  });
+});
+
+describe('isDuplicateStory', () => {
+  it('matches reworded headlines of the same story (overlap)', () => {
+    expect(isDuplicateStory(
+      'Bybit, Binance, Bitget cancel tokenized SpaceX IPO allocations after some get smoked',
+      ['Bybit, Binance and Bitget Cancel Tokenized SpaceX Allocations'],
+    )).toBe(true);
+  });
+
+  it('does not match unrelated headlines', () => {
+    expect(isDuplicateStory(
+      'Kraken adds new staking pairs for EUR users',
+      ['Bybit, Binance and Bitget Cancel Tokenized SpaceX Allocations'],
+    )).toBe(false);
+  });
+
+  it('does not over-match very short generic headlines', () => {
+    // Too few significant tokens → only exact normalized match counts.
+    expect(isDuplicateStory('Bitcoin rises', ['Bitcoin falls'])).toBe(false);
+  });
+});
+
+describe('resolveExchangeBrand', () => {
+  it('resolves a CBW-listed exchange', () => {
+    expect(resolveExchangeBrand('Bybit launches new launchpool')).toEqual({ slug: 'bybit', name: 'Bybit' });
+  });
+
+  it('resolves a major exchange with no CBW page', () => {
+    expect(resolveExchangeBrand('Coinbase adds support for new token')).toEqual({ slug: 'coinbase', name: 'Coinbase' });
+    expect(resolveExchangeBrand('Upbit delists three assets')).toEqual({ slug: 'upbit', name: 'Upbit' });
+  });
+
+  it('returns null when no exchange is named', () => {
+    expect(resolveExchangeBrand('Bitcoin price holds above key level')).toBeNull();
   });
 });
 

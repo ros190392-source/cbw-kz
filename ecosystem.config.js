@@ -23,6 +23,10 @@ module.exports = {
       min_uptime: '30s',
       restart_delay: 5000,
       max_memory_restart: '400M',
+      // Daily preventive restart before the first news slot (08:00 UTC):
+      // a long-lived process can wake from machine sleep with broken DNS
+      // (observed 2026-06-12: endless getaddrinfo ENOTFOUND until restart).
+      cron_restart: '45 5 * * *',
       env: {
         NODE_ENV: 'production',
       },

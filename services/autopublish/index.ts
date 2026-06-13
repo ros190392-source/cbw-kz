@@ -54,6 +54,14 @@ export interface AutopublishState {
   consecutiveFailures: number;
   /** Idempotency key of the last published news slot, e.g. "2026-06-11#1". */
   lastNewsSlot: string | null;
+  /** Idempotency key of the last published promo slot, e.g. "2026-06-12#0". */
+  lastPromoSlot: string | null;
+  /** Announcement URLs already posted by the promo lane (dedup, capped). */
+  postedPromoUrls: string[];
+  /** Exchange slug of the last promo post (rotation hint). */
+  lastPromoExchange: string | null;
+  /** Organic scheduler's randomized plan for the current UTC day (EPIC 026). */
+  dailyPlan: import('./schedule').DailyPlan | null;
 }
 
 const DEFAULTS: AutopublishState = {
@@ -65,6 +73,10 @@ const DEFAULTS: AutopublishState = {
   lastError: null,
   consecutiveFailures: 0,
   lastNewsSlot: null,
+  lastPromoSlot: null,
+  postedPromoUrls: [],
+  lastPromoExchange: null,
+  dailyPlan: null,
 };
 
 export class AutopublishStore {

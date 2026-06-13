@@ -152,7 +152,7 @@ import { DraftType, GuideTopic } from '../../src/types';
 import { logger } from '../../src/logger';
 import http from 'http';
 import { AutopublishStore, autopublishTick } from '../../services/autopublish';
-import { newsAutopublishTick } from '../../services/autopublish/news';
+import { organicAutopublishTick } from '../../services/autopublish/organic';
 import { formatAutopublishToggle, formatAutopublishStatus } from '../../services/autopublish/format';
 
 /**
@@ -972,13 +972,14 @@ async function main() {
     if (tickInFlight) return;
     tickInFlight = true;
     const tick = config.autopublish.mode === 'news'
-      ? newsAutopublishTick({
+      ? organicAutopublishTick({
           drafts,
           autopublish,
           bot,
           channelId: config.telegram.channelId,
           notify: autopublishNotify,
-        })
+          banner: true,
+        }).then(() => undefined)
       : autopublishTick({
           store: channelPosts,
           autopublish,

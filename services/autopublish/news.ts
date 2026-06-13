@@ -2,8 +2,11 @@ import { DraftStore } from '../../src/draft-store';
 import { DraftRecord } from '../../src/types';
 import { SenderBot, validateContentSafety } from '../content-center';
 import { renderNewsCard, detectCountry } from '../news-card';
-import { buildFunnelFooter } from '../funnel';
+import { detectExchange } from '../funnel';
+import { newsVoice, hashSeed } from './voice';
+import { renderBrandedBanner, renderBrandFallback } from '../promo-radar/banner';
 import { AutopublishStore } from './index';
+import { normalizeTitle } from '../../src/storage';
 import { logger } from '../../src/logger';
 
 /**
@@ -53,11 +56,136 @@ export function newsSlotKey(now: Date, slotIndex: number): string {
 // ── Selection ───────────────────────────────────────────────────────────────
 
 /**
+ * Exchange-first positioning (EPIC 025): the channel is about exchanges —
+ * their news, products, listings, incidents — not general macro. A story
+ * counts as an exchange story when it mentions a CBW-listed exchange or any
+ * clearly exchange-domain term (incl. major exchanges without a CBW page:
+ * exchange news about Coinbase is still exchange news; the footer just
+ * falls back to /bonuses/).
+ */
+const EXCHANGE_TERMS = [
+  'exchange', ' listing', ' lists ', 'delist', 'launchpool', 'launchpad',
+  'airdrop', 'trading fee', 'withdrawal', 'coinbase', 'kraken', 'gate.io',
+  'crypto.com', 'upbit', 'bithumb',
+];
+
+export function isExchangeStory(text: string): boolean {
+  if (detectExchange(text)) return true;
+  const t = ` ${(text ?? '').toLowerCase()} `;
+  return EXCHANGE_TERMS.some((k) => t.includes(k));
+}
+
+/**
+ * Major exchanges that have no CBW page (so detectExchange ignores them) but
+ * are still the subject of exchange news — used to brand the fallback card.
+ * slugs map to brand colors in promo-radar/banner.ts.
+ */
+const MAJOR_BRANDS: { kw: string; slug: string; name: string }[] = [
+  { kw: 'coinbase', slug: 'coinbase', name: 'Coinbase' },
+  { kw: 'kraken', slug: 'kraken', name: 'Kraken' },
+  { kw: 'crypto.com', slug: 'cryptocom', name: 'Crypto.com' },
+  { kw: 'gate.io', slug: 'gateio', name: 'Gate.io' },
+  { kw: 'upbit', slug: 'upbit', name: 'Upbit' },
+  { kw: 'bithumb', slug: 'bithumb', name: 'Bithumb' },
+];
+
+/** The exchange a story is about, for branding the image. CBW-listed first. */
+export function resolveExchangeBrand(text: string): { slug: string; name: string } | null {
+  const listed = detectExchange(text);
+  if (listed) return { slug: listed.slug, name: listed.name };
+  const t = ` ${(text ?? '').toLowerCase()} `;
+  const major = MAJOR_BRANDS.find((m) => t.includes(m.kw));
+  return major ? { slug: major.slug, name: major.name } : null;
+}
+
+// ── Cross-day duplicate guard ─────────────────────────────────────────────────
+
+/**
+ * How far back to remember already-published stories when checking a new
+ * candidate for duplication. The same story routinely resurfaces a day later
+ * from a *different* source (different link, slightly reworded headline), so a
+ * 36h freshness window is not enough — we look back several days.
+ */
+export const DEDUP_WINDOW_H = 96;
+
+/** Min significant tokens before fuzzy matching kicks in (else require exact). */
+const MIN_DEDUP_TOKENS = 4;
+
+/** Overlap-coefficient threshold above which two headlines are "the same story". */
+const DEDUP_OVERLAP = 0.7;
+
+/** Tokens that carry no story identity — dropped before comparing headlines. */
+const TITLE_STOPWORDS = new Set([
+  'the', 'and', 'for', 'with', 'after', 'into', 'from', 'over', 'amid', 'its',
+  'new', 'now', 'set', 'how', 'why', 'are', 'was', 'has', 'will', 'some', 'get',
+  'gets', 'say', 'says', 'this', 'that', 'than', 'but', 'not', 'out', 'all',
+]);
+
+/** Significant tokens of a headline (length ≥3, non-stopword), from titleNorm. */
+function significantTokens(title: string): Set<string> {
+  return new Set(
+    normalizeTitle(title)
+      .split(' ')
+      .filter((w) => w.length >= 3 && !TITLE_STOPWORDS.has(w)),
+  );
+}
+
+/**
+ * Overlap coefficient |A∩B| / min(|A|,|B|). Robust to one headline being a
+ * reworded superset of the other (added "IPO", "after some get smoked", etc.).
+ */
+function tokenOverlap(a: Set<string>, b: Set<string>): number {
+  const small = a.size <= b.size ? a : b;
+  const big = small === a ? b : a;
+  if (small.size === 0) return 0;
+  let hit = 0;
+  for (const t of small) if (big.has(t)) hit++;
+  return hit / small.size;
+}
+
+/** True when `candidate` tells the same story as one of `published` headlines. */
+export function isDuplicateStory(candidate: string, published: string[]): boolean {
+  const cand = significantTokens(candidate);
+  const candNorm = normalizeTitle(candidate);
+  for (const p of published) {
+    if (normalizeTitle(p) === candNorm) return true; // exact (post-normalization)
+    const pt = significantTokens(p);
+    if (cand.size < MIN_DEDUP_TOKENS || pt.size < MIN_DEDUP_TOKENS) continue;
+    if (tokenOverlap(cand, pt) >= DEDUP_OVERLAP) return true;
+  }
+  return false;
+}
+
+/**
  * Pick the best publishable pending draft: fresh (≤ MAX_NEWS_AGE_H), passes
  * the safety validator, highest score first (ties → newer story).
+ *
+ * Exchange stories are preferred outright; the best general story is only a
+ * fallback so a slot is never silently skipped when exchange news is quiet.
  */
-export function selectTopNewsDraft(drafts: DraftRecord[], now: Date = new Date()): DraftRecord | null {
+export type NewsLane = 'exchange' | 'global' | 'any';
+
+export function selectTopNewsDraft(
+  drafts: DraftRecord[],
+  now: Date = new Date(),
+  lane: NewsLane = 'any',
+): DraftRecord | null {
   const cutoff = now.getTime() - MAX_NEWS_AGE_H * 60 * 60 * 1000;
+
+  // Stories already shipped to the channel in the last few days. The same story
+  // resurfaces from a different source (different link, reworded headline), so
+  // we match on headline meaning, not just link or exact title.
+  const dedupCutoff = now.getTime() - DEDUP_WINDOW_H * 60 * 60 * 1000;
+  const publishedTitles: string[] = [];
+  const publishedLinks = new Set<string>();
+  for (const d of drafts) {
+    if (d.status !== 'published') continue;
+    const t = new Date(d.publishedAt ?? d.publishDate).getTime();
+    if (!Number.isFinite(t) || t < dedupCutoff) continue;
+    publishedTitles.push(d.title ?? '');
+    if (d.link) publishedLinks.add(d.link);
+  }
+
   const eligible = drafts
     .filter(d => d.status === 'pending')
     .filter(d => {
@@ -65,23 +193,42 @@ export function selectTopNewsDraft(drafts: DraftRecord[], now: Date = new Date()
       return Number.isFinite(t) && t >= cutoff;
     })
     .filter(d => validateContentSafety(`${d.title} ${d.text}`).length === 0)
+    .filter(d => !publishedLinks.has(d.link))
+    .filter(d => !isDuplicateStory(d.title ?? '', publishedTitles))
     .sort((a, b) =>
       (b.scoreTotal ?? 0) - (a.scoreTotal ?? 0) ||
       (b.publishDate ?? '').localeCompare(a.publishDate ?? ''),
     );
-  return eligible[0] ?? null;
+
+  // Lane filter: 'exchange' → only exchange stories; 'global' → only
+  // non-exchange (macro/markets/regulation); 'any' → exchange-first with a
+  // general fallback (legacy single-lane behavior).
+  if (lane === 'exchange') {
+    return eligible.find(d => isExchangeStory(`${d.title} ${d.text}`)) ?? null;
+  }
+  if (lane === 'global') {
+    return eligible.find(d => !isExchangeStory(`${d.title} ${d.text}`)) ?? null;
+  }
+  const exchange = eligible.find(d => isExchangeStory(`${d.title} ${d.text}`));
+  return exchange ?? eligible[0] ?? null;
 }
 
 /** Telegram photo-caption limit. */
 const CAPTION_LIMIT = 1024;
 
-/** Build the channel caption: post body + source attribution + CBW funnel footer. */
+/**
+ * Build the channel caption: optional human opener + post body + (varied)
+ * source attribution + (varied) CBW funnel footer. The voice picks are
+ * deterministic per draft id, so a post always renders identically.
+ */
 export function buildNewsCaption(rec: DraftRecord): string {
-  const funnel = `\n\n${buildFunnelFooter(`${rec.title} ${rec.text}`)}`;
-  const attribution = `\n\n📰 ${rec.source}\n${rec.link}`;
-  const maxBody = CAPTION_LIMIT - attribution.length - funnel.length;
+  const v = newsVoice(hashSeed(rec.id), rec.source, rec.link, `${rec.title} ${rec.text}`);
+  const head = v.opener ? `${v.opener}\n\n` : '';
+  const attribution = `\n\n${v.attribution}`;
+  const funnel = `\n\n${v.footer}`;
+  const maxBody = CAPTION_LIMIT - head.length - attribution.length - funnel.length;
   const body = rec.text.length > maxBody ? rec.text.slice(0, maxBody - 2).trimEnd() + ' …' : rec.text;
-  return `${body}${attribution}${funnel}`;
+  return `${head}${body}${attribution}${funnel}`;
 }
 
 // ── Tick ────────────────────────────────────────────────────────────────────
@@ -95,6 +242,12 @@ export interface NewsTickContext {
   /** Where rendered cards are written (tests override). */
   cardDir?: string;
   notify?: (text: string) => Promise<void>;
+  /**
+   * Use the source article's own og:image (in CBW gold framing) for exchange
+   * stories instead of the AI card. Opt-in (the bot enables it); tests and
+   * offline runs keep the deterministic card path.
+   */
+  banner?: boolean;
 }
 
 export type NewsTickAction =
@@ -134,16 +287,39 @@ export async function newsAutopublishTick(ctx: NewsTickContext): Promise<NewsTic
   if (!rec) return { action: 'no_eligible_news', slotKey: key };
 
   try {
-    const card = await renderNewsCard(rec.id, {
-      title: rec.title,
-      category: rec.category,
-      source: rec.source,
-      publishDate: rec.publishDate,
-      country: detectCountry(`${rec.title} ${rec.text}`),
-    }, { outDir: ctx.cardDir });
+    // Exchange stories: prefer the source article's own image in CBW gold
+    // framing (the source is credited in the caption); fail-open to our card.
+    let imagePath: string | null = null;
+    if (ctx.banner === true && isExchangeStory(`${rec.title} ${rec.text}`)) {
+      imagePath = await renderBrandedBanner(`news-${rec.id}`, rec.link, {
+        outDir: ctx.cardDir,
+        label: 'EXCHANGE NEWS',
+      });
+      // No usable source image → branded brand-card for the exchange the story
+      // is about (logo + name in the CBW frame), same look as the Bonus Alert.
+      if (!imagePath) {
+        const brand = resolveExchangeBrand(`${rec.title} ${rec.text}`);
+        if (brand) {
+          imagePath = await renderBrandFallback(`news-${rec.id}`, brand.slug, brand.name, {
+            outDir: ctx.cardDir,
+            label: 'EXCHANGE NEWS',
+          });
+        }
+      }
+    }
+    if (!imagePath) {
+      const card = await renderNewsCard(rec.id, {
+        title: rec.title,
+        category: rec.category,
+        source: rec.source,
+        publishDate: rec.publishDate,
+        country: detectCountry(`${rec.title} ${rec.text}`),
+      }, { outDir: ctx.cardDir });
+      imagePath = card.filePath;
+    }
 
     const caption = buildNewsCaption(rec);
-    const msg = await ctx.bot.sendPhoto(ctx.channelId, card.filePath, { caption });
+    const msg = await ctx.bot.sendPhoto(ctx.channelId, imagePath, { caption });
 
     const at = now.toISOString();
     ctx.drafts.update(rec.id, {
