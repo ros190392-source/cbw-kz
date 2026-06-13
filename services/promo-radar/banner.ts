@@ -147,20 +147,34 @@ export async function renderBrandFallback(
   try {
     const color = BRAND[slug] ?? GOLD;
     const cx = W / 2;
-    const glyphCy = 248;
-    const glyphR = 88;
-    const nameSize = name.length > 9 ? 84 : 104;
     const haloFill = luminance(color) < 0.22 ? '#FFFFFF' : color;
-    // Soft halo behind the logo — layered translucent discs (no SVG filter
-    // dependency), gives the logo depth on the dark canvas.
-    const halo = [2.6, 1.9, 1.35]
-      .map((m, i) => `<circle cx="${cx}" cy="${glyphCy}" r="${glyphR * m}" fill="${haloFill}" fill-opacity="${[0.05, 0.08, 0.12][i]}"/>`)
-      .join('');
 
     // Prefer the exchange's real official logo (bundled tile); fall back to a
     // drawn glyph/monogram only when no logo asset exists for this slug.
     const logoFile = path.join(LOGO_DIR, `${slug}.png`);
     const hasLogo = fs.existsSync(logoFile);
+
+    // ── Vertical layout, computed so the artwork never collides with the name
+    //    or the bottom bar (chip/domain live in the last ~170px). The logo/glyph
+    //    box is centered in the upper area; the name sits a guaranteed gap below
+    //    its bottom edge; the underline below that. ──────────────────────────
+    const ART = 248;                 // logo tile / glyph bounding box
+    const artCy = 236;               // box center y
+    const glyphR = (ART / 2) * 0.72; // drawn-glyph radius (fallback)
+    const artBottom = artCy + ART / 2;
+    const nameSize = name.length > 9 ? 84 : 104;
+    const GAP = 34;                  // min clear space between logo and name
+    const nameBaseline = artBottom + GAP + nameSize * 0.74; // +cap height
+    const underlineY = Math.round(nameBaseline + 22);
+    // Hard guard: keep the underline clear of the bottom bar.
+    const bottomBarTop = H - 170;
+    const safeUnderlineY = Math.min(underlineY, bottomBarTop - 24);
+
+    // Soft halo behind the logo — layered translucent discs (no SVG filter
+    // dependency), gives the logo depth on the dark canvas.
+    const halo = [2.6, 1.9, 1.35]
+      .map((m, i) => `<circle cx="${cx}" cy="${artCy}" r="${glyphR * m}" fill="${haloFill}" fill-opacity="${[0.05, 0.08, 0.12][i]}"/>`)
+      .join('');
 
     const base = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
       <defs>
@@ -176,9 +190,9 @@ export async function renderBrandFallback(
       <rect width="${W}" height="${H}" fill="url(#bg)"/>
       <rect width="${W}" height="${H}" fill="url(#glow)"/>
       ${halo}
-      ${hasLogo ? '' : brandGlyphSvg(slug, name, cx, glyphCy, glyphR, color)}
-      <text x="${cx}" y="512" text-anchor="middle" font-family="Arial" font-weight="900" font-size="${nameSize}" fill="#FFFFFF" letter-spacing="2">${name}</text>
-      <rect x="${cx - 120}" y="544" width="240" height="4" rx="2" fill="${GOLD}" fill-opacity="0.85"/>
+      ${hasLogo ? '' : brandGlyphSvg(slug, name, cx, artCy, glyphR, color)}
+      <text x="${cx}" y="${Math.round(nameBaseline)}" text-anchor="middle" font-family="Arial" font-weight="900" font-size="${nameSize}" fill="#FFFFFF" letter-spacing="2">${name}</text>
+      <rect x="${cx - 120}" y="${safeUnderlineY}" width="240" height="4" rx="2" fill="${GOLD}" fill-opacity="0.85"/>
     </svg>`;
 
     const outDir = opts.outDir ?? path.join(process.cwd(), 'data', 'cards');
@@ -187,9 +201,8 @@ export async function renderBrandFallback(
 
     const layers: sharp.OverlayOptions[] = [];
     if (hasLogo) {
-      const TILE = 272;
-      const logo = await sharp(logoFile).resize(TILE, TILE, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).toBuffer();
-      layers.push({ input: logo, top: Math.round(glyphCy - TILE / 2), left: Math.round(cx - TILE / 2) });
+      const logo = await sharp(logoFile).resize(ART, ART, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).toBuffer();
+      layers.push({ input: logo, top: Math.round(artCy - ART / 2), left: Math.round(cx - ART / 2) });
     }
     layers.push({ input: Buffer.from(frameOverlaySvg(opts.label)) });
 
