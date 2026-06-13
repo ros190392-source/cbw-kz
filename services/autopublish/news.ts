@@ -2,7 +2,8 @@ import { DraftStore } from '../../src/draft-store';
 import { DraftRecord } from '../../src/types';
 import { SenderBot, validateContentSafety } from '../content-center';
 import { renderNewsCard, detectCountry } from '../news-card';
-import { buildFunnelFooter, detectExchange } from '../funnel';
+import { detectExchange } from '../funnel';
+import { newsVoice, hashSeed } from './voice';
 import { renderBrandedBanner, renderBrandFallback } from '../promo-radar/banner';
 import { AutopublishStore } from './index';
 import { normalizeTitle } from '../../src/storage';
@@ -215,13 +216,19 @@ export function selectTopNewsDraft(
 /** Telegram photo-caption limit. */
 const CAPTION_LIMIT = 1024;
 
-/** Build the channel caption: post body + source attribution + CBW funnel footer. */
+/**
+ * Build the channel caption: optional human opener + post body + (varied)
+ * source attribution + (varied) CBW funnel footer. The voice picks are
+ * deterministic per draft id, so a post always renders identically.
+ */
 export function buildNewsCaption(rec: DraftRecord): string {
-  const funnel = `\n\n${buildFunnelFooter(`${rec.title} ${rec.text}`)}`;
-  const attribution = `\n\n📰 ${rec.source}\n${rec.link}`;
-  const maxBody = CAPTION_LIMIT - attribution.length - funnel.length;
+  const v = newsVoice(hashSeed(rec.id), rec.source, rec.link, `${rec.title} ${rec.text}`);
+  const head = v.opener ? `${v.opener}\n\n` : '';
+  const attribution = `\n\n${v.attribution}`;
+  const funnel = `\n\n${v.footer}`;
+  const maxBody = CAPTION_LIMIT - head.length - attribution.length - funnel.length;
   const body = rec.text.length > maxBody ? rec.text.slice(0, maxBody - 2).trimEnd() + ' …' : rec.text;
-  return `${body}${attribution}${funnel}`;
+  return `${head}${body}${attribution}${funnel}`;
 }
 
 // ── Tick ────────────────────────────────────────────────────────────────────

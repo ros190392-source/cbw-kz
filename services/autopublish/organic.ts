@@ -9,6 +9,7 @@ import {
   selectTopNewsDraft, buildNewsCaption, isExchangeStory, resolveExchangeBrand,
 } from './news';
 import { buildPromoCaption, POSTED_URLS_CAP } from './promo';
+import { bannerLabel, hashSeed } from './voice';
 import { AutopublishStore, AutopublishState, MAX_CONSECUTIVE_FAILURES } from './index';
 import {
   buildDailyPlan, nextDueItem, isExpired, DailyPlan, Lane,
@@ -145,7 +146,7 @@ async function publishNews(
   const rec = selectTopNewsDraft(ctx.drafts.all(), now, lane);
   if (!rec) return null;
 
-  const label = lane === 'exchange' ? 'EXCHANGE NEWS' : 'CRYPTO NEWS';
+  const label = bannerLabel(lane, `${rec.title} ${rec.text}`, hashSeed(rec.id));
   let imagePath: string | null = null;
   if (useBanner) {
     imagePath = await renderBrandedBanner(`news-${rec.id}`, rec.link, { outDir: ctx.cardDir, label });

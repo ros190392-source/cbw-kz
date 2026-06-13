@@ -4,6 +4,7 @@ import { SenderBot, validateContentSafety } from '../content-center';
 import { renderNewsCard } from '../news-card';
 import { funnelUrl, SITE_BASE, UTM } from '../funnel';
 import { collectPromos, selectPromo, PromoItem } from '../promo-radar';
+import { promoVoice, hashSeed } from './voice';
 import { renderBrandedBanner, renderBrandFallback } from '../promo-radar/banner';
 import { AutopublishStore } from './index';
 import { logger } from '../../src/logger';
@@ -81,10 +82,14 @@ function fmtDate(ms: number): string {
  * deadline when known, official source link, CBW funnel footer.
  */
 export function buildPromoCaption(p: PromoItem, now: Date = new Date()): string {
-  const header = `🎁 Bonus Alert — ${p.exchangeName}`;
+  const v = promoVoice(
+    hashSeed(p.url), p.exchangeName, p.exchangeSlug, p.url,
+    funnelUrl({ slug: p.exchangeSlug, name: p.exchangeName }),
+  );
+  const header = v.header;
   const deadline = p.endsAt && p.endsAt > now.getTime() ? `\n\n⏳ Ends ${fmtDate(p.endsAt)} (UTC)` : '';
-  const source = `\n\n📰 Official announcement\n${p.url}`;
-  const footer = `\n\n🎁 All ${p.exchangeName} bonuses & promo codes\n${funnelUrl({ slug: p.exchangeSlug, name: p.exchangeName })}`;
+  const source = `\n\n${v.source}`;
+  const footer = `\n\n${v.footer}`;
   const fixed = `${header}\n\n` + `${deadline}${source}${footer}`;
   const maxTitle = CAPTION_LIMIT - fixed.length;
   const title = p.title.length > maxTitle ? p.title.slice(0, maxTitle - 2).trimEnd() + ' …' : p.title;

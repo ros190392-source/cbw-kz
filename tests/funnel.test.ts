@@ -66,17 +66,18 @@ describe('buildFunnelFooter', () => {
 });
 
 describe('buildNewsCaption with funnel', () => {
-  it('appends the funnel footer after source attribution', () => {
+  it('attributes the source and routes the funnel footer after it', () => {
     const c = buildNewsCaption(draft());
-    expect(c).toContain('📰 The Block');
-    expect(c.indexOf('🎁')).toBeGreaterThan(c.indexOf('📰'));
-    expect(c).toContain('/exchanges/bybit/?utm_source=telegram');
+    expect(c).toContain('The Block');                 // source (wording varies)
+    expect(c).toContain('/exchanges/bybit/?utm_source=telegram'); // exchange-routed CTA
+    // attribution (with the link) always precedes the funnel footer
+    expect(c.indexOf('/exchanges/bybit/')).toBeGreaterThan(c.indexOf('The Block'));
   });
 
-  it('stays within the 1024-char Telegram caption limit', () => {
+  it('stays within the 1024-char Telegram caption limit and keeps the CTA', () => {
     const c = buildNewsCaption(draft({ text: 'x'.repeat(2000) }));
     expect(c.length).toBeLessThanOrEqual(1024);
-    expect(c).toContain('🎁');
-    expect(c).toContain('📰');
+    expect(c).toContain('/exchanges/bybit/'); // funnel survived the trim
+    expect(c).toContain('The Block');
   });
 });

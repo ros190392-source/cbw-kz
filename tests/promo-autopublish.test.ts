@@ -93,13 +93,16 @@ describe('promo slot', () => {
 // ── Caption ──────────────────────────────────────────────────────────────────
 
 describe('buildPromoCaption', () => {
-  it('contains header, title, source link and funnel footer', () => {
+  it('contains exchange name, title, source link and funnel footer', () => {
     const c = buildPromoCaption(promo(), SLOT_NOW);
-    expect(c).toContain('🎁 Bonus Alert — Bybit');
+    expect(c).toContain('Bybit');
     expect(c).toContain('Trade to share up to 100,000 USDT');
-    expect(c).toContain('📰 Official announcement');
     expect(c).toContain('https://announcements.bybit.com');
     expect(c).toContain('https://cryptobonusworld.com/exchanges/bybit/?utm_source=telegram');
+  });
+
+  it('is deterministic per promo (same input → same caption)', () => {
+    expect(buildPromoCaption(promo(), SLOT_NOW)).toBe(buildPromoCaption(promo(), SLOT_NOW));
   });
 
   it('shows the deadline when endsAt is known and future', () => {
