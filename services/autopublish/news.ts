@@ -3,7 +3,7 @@ import { DraftRecord } from '../../src/types';
 import { SenderBot, validateContentSafety } from '../content-center';
 import { renderNewsCard, detectCountry } from '../news-card';
 import { buildFunnelFooter, detectExchange } from '../funnel';
-import { renderBrandedBanner } from '../promo-radar/banner';
+import { renderBrandedBanner, renderBrandFallback } from '../promo-radar/banner';
 import { AutopublishStore } from './index';
 import { normalizeTitle } from '../../src/storage';
 import { logger } from '../../src/logger';
@@ -72,6 +72,29 @@ export function isExchangeStory(text: string): boolean {
   if (detectExchange(text)) return true;
   const t = ` ${(text ?? '').toLowerCase()} `;
   return EXCHANGE_TERMS.some((k) => t.includes(k));
+}
+
+/**
+ * Major exchanges that have no CBW page (so detectExchange ignores them) but
+ * are still the subject of exchange news — used to brand the fallback card.
+ * slugs map to brand colors in promo-radar/banner.ts.
+ */
+const MAJOR_BRANDS: { kw: string; slug: string; name: string }[] = [
+  { kw: 'coinbase', slug: 'coinbase', name: 'Coinbase' },
+  { kw: 'kraken', slug: 'kraken', name: 'Kraken' },
+  { kw: 'crypto.com', slug: 'cryptocom', name: 'Crypto.com' },
+  { kw: 'gate.io', slug: 'gateio', name: 'Gate.io' },
+  { kw: 'upbit', slug: 'upbit', name: 'Upbit' },
+  { kw: 'bithumb', slug: 'bithumb', name: 'Bithumb' },
+];
+
+/** The exchange a story is about, for branding the image. CBW-listed first. */
+export function resolveExchangeBrand(text: string): { slug: string; name: string } | null {
+  const listed = detectExchange(text);
+  if (listed) return { slug: listed.slug, name: listed.name };
+  const t = ` ${(text ?? '').toLowerCase()} `;
+  const major = MAJOR_BRANDS.find((m) => t.includes(m.kw));
+  return major ? { slug: major.slug, name: major.name } : null;
 }
 
 // ── Cross-day duplicate guard ─────────────────────────────────────────────────
@@ -249,6 +272,17 @@ export async function newsAutopublishTick(ctx: NewsTickContext): Promise<NewsTic
         outDir: ctx.cardDir,
         label: 'EXCHANGE NEWS',
       });
+      // No usable source image → branded brand-card for the exchange the story
+      // is about (logo + name in the CBW frame), same look as the Bonus Alert.
+      if (!imagePath) {
+        const brand = resolveExchangeBrand(`${rec.title} ${rec.text}`);
+        if (brand) {
+          imagePath = await renderBrandFallback(`news-${rec.id}`, brand.slug, brand.name, {
+            outDir: ctx.cardDir,
+            label: 'EXCHANGE NEWS',
+          });
+        }
+      }
     }
     if (!imagePath) {
       const card = await renderNewsCard(rec.id, {

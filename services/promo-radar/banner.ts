@@ -65,6 +65,7 @@ export function frameOverlaySvg(label = 'BONUS ALERT'): string {
     </defs>
     <rect y="${H - 170}" width="${W}" height="170" fill="url(#bottom)"/>
     <rect x="6" y="6" width="${W - 12}" height="${H - 12}" rx="18" fill="none" stroke="${GOLD}" stroke-width="12"/>
+    <rect x="26" y="26" width="${W - 52}" height="${H - 52}" rx="8" fill="none" stroke="${GOLD}" stroke-opacity="0.35" stroke-width="2"/>
     <rect x="48" y="${H - 118}" rx="26" width="${chipW}" height="52" fill="${GOLD}"/>
     <text x="${48 + 28}" y="${H - 82}" font-family="Arial" font-weight="800" font-size="30" fill="${DARK}" letter-spacing="3">${label}</text>
     <rect x="${W - 48 - 414}" y="${H - 118}" rx="26" width="414" height="52" fill="${DARK}" fill-opacity="0.85"/>
@@ -91,6 +92,15 @@ const BRAND: Record<string, string> = {
   htx: '#2A5ADA',
   kraken: '#7B5BFF',
   coinbase: '#0052FF',
+  bingx: '#2354E6',
+  coinex: '#00C087',
+  phemex: '#1B5BFF',
+  bitunix: '#16C784',
+  lbank: '#2B6DEF',
+  cryptocom: '#0A2A5E',
+  upbit: '#093687',
+  bithumb: '#F37321',
+  gateio: '#5C4DFF',
 };
 
 /** Relative luminance of a #RRGGBB color (0 = black, 1 = white). */
@@ -134,20 +144,32 @@ export async function renderBrandFallback(
   try {
     const color = BRAND[slug] ?? GOLD;
     const cx = W / 2;
-    const glyphCy = 282;
-    const glyphR = 96;
-    const nameSize = name.length > 9 ? 92 : 116;
+    const glyphCy = 270;
+    const glyphR = 92;
+    const nameSize = name.length > 9 ? 88 : 112;
+    const haloFill = luminance(color) < 0.22 ? '#FFFFFF' : color;
+    // Soft halo behind the logo — layered translucent discs (no SVG filter
+    // dependency), gives the glyph depth on the dark canvas.
+    const halo = [2.6, 1.9, 1.35]
+      .map((m, i) => `<circle cx="${cx}" cy="${glyphCy}" r="${glyphR * m}" fill="${haloFill}" fill-opacity="${[0.05, 0.08, 0.12][i]}"/>`)
+      .join('');
     const base = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
       <defs>
-        <radialGradient id="glow" cx="50%" cy="38%" r="65%">
-          <stop offset="0%" stop-color="${color}" stop-opacity="0.30"/>
+        <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#101A2E"/>
+          <stop offset="100%" stop-color="${DARK}"/>
+        </linearGradient>
+        <radialGradient id="glow" cx="50%" cy="36%" r="62%">
+          <stop offset="0%" stop-color="${color}" stop-opacity="0.28"/>
           <stop offset="100%" stop-color="${DARK}" stop-opacity="0"/>
         </radialGradient>
       </defs>
-      <rect width="${W}" height="${H}" fill="${DARK}"/>
+      <rect width="${W}" height="${H}" fill="url(#bg)"/>
       <rect width="${W}" height="${H}" fill="url(#glow)"/>
+      ${halo}
       ${brandGlyphSvg(slug, name, cx, glyphCy, glyphR, color)}
-      <text x="${cx}" y="500" text-anchor="middle" font-family="Arial" font-weight="900" font-size="${nameSize}" fill="#FFFFFF" letter-spacing="2">${name}</text>
+      <text x="${cx}" y="496" text-anchor="middle" font-family="Arial" font-weight="900" font-size="${nameSize}" fill="#FFFFFF" letter-spacing="2">${name}</text>
+      <rect x="${cx - 120}" y="528" width="240" height="4" rx="2" fill="${GOLD}" fill-opacity="0.85"/>
     </svg>`;
 
     const outDir = opts.outDir ?? path.join(process.cwd(), 'data', 'cards');

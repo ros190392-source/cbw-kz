@@ -10,6 +10,7 @@ import {
   buildNewsCaption,
   newsAutopublishTick,
   isDuplicateStory,
+  resolveExchangeBrand,
   MAX_NEWS_AGE_H,
 } from '../services/autopublish/news';
 import { AutopublishStore } from '../services/autopublish';
@@ -201,6 +202,21 @@ describe('isDuplicateStory', () => {
   it('does not over-match very short generic headlines', () => {
     // Too few significant tokens → only exact normalized match counts.
     expect(isDuplicateStory('Bitcoin rises', ['Bitcoin falls'])).toBe(false);
+  });
+});
+
+describe('resolveExchangeBrand', () => {
+  it('resolves a CBW-listed exchange', () => {
+    expect(resolveExchangeBrand('Bybit launches new launchpool')).toEqual({ slug: 'bybit', name: 'Bybit' });
+  });
+
+  it('resolves a major exchange with no CBW page', () => {
+    expect(resolveExchangeBrand('Coinbase adds support for new token')).toEqual({ slug: 'coinbase', name: 'Coinbase' });
+    expect(resolveExchangeBrand('Upbit delists three assets')).toEqual({ slug: 'upbit', name: 'Upbit' });
+  });
+
+  it('returns null when no exchange is named', () => {
+    expect(resolveExchangeBrand('Bitcoin price holds above key level')).toBeNull();
   });
 });
 
