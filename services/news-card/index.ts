@@ -91,6 +91,32 @@ export function wrapHeadline(title: string, maxChars: number, maxLines: number):
   return lines;
 }
 
+/**
+ * Deterministic per-card visual variation (seeded by the news id) so two cards
+ * in the same category never look the same: different crop, a subtle color
+ * grade, and an accent glow in a different corner.
+ */
+export function cardVariation(id: string) {
+  let h = 2166136261;
+  for (let i = 0; i < id.length; i++) { h ^= id.charCodeAt(i); h = Math.imul(h, 16777619); }
+  let a = h >>> 0;
+  const rng = () => {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const pick = <T,>(arr: readonly T[]): T => arr[Math.floor(rng() * arr.length)];
+  return {
+    position: pick(['left', 'centre', 'right', 'top', 'left top', 'right top', 'left bottom', 'right bottom'] as const),
+    hue: pick([-26, -14, 0, 12, 22, 34] as const),
+    saturation: +(0.95 + rng() * 0.25).toFixed(3),
+    brightness: +(0.93 + rng() * 0.12).toFixed(3),
+    glowCorner: pick(['tr', 'br', 'tl'] as const),
+    glowOpacity: +(0.16 + rng() * 0.16).toFixed(3),
+  };
+}
+
 function fmtDate(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
@@ -228,12 +254,19 @@ export async function renderNewsCard(
     : [];
 
   if (bgPath) {
-    // AI background: photo resized to cover, then a legibility scrim (darker on
-    // the left where the headline sits, darker at the bottom for the footer),
-    // then the text layer.
+    // AI background: photo resized to cover (seeded crop), a per-card accent
+    // glow, then a legibility scrim (darker on the left where the headline
+    // sits, darker at the bottom for the footer), then the text layer. The
+    // seeded crop + color grade + glow corner keep same-category cards distinct.
+    const vr = cardVariation(id);
+    const glowXY = { tr: [W, 0], br: [W, H], tl: [0, 0] }[vr.glowCorner];
     const overlay = `
 <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
   <defs>
+    <radialGradient id="glow" cx="${glowXY[0]}" cy="${glowXY[1]}" r="${Math.round(W * 0.55)}" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="${accent.color}" stop-opacity="${vr.glowOpacity}"/>
+      <stop offset="100%" stop-color="${accent.color}" stop-opacity="0"/>
+    </radialGradient>
     <linearGradient id="scrimL" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0%" stop-color="#080b11" stop-opacity="0.93"/>
       <stop offset="38%" stop-color="#080b11" stop-opacity="0.82"/>
@@ -246,17 +279,19 @@ export async function renderNewsCard(
       <stop offset="100%" stop-color="#080b11" stop-opacity="0.75"/>
     </linearGradient>
   </defs>
+  <rect width="${W}" height="${H}" fill="url(#glow)"/>
   <rect width="${W}" height="${H}" fill="url(#scrimL)"/>
   <rect width="${W}" height="${H}" fill="url(#scrimB)"/>
   ${flagShadow}
   ${textLayer}
 </svg>`;
     await sharp(bgPath)
-      .resize(W, H, { fit: 'cover', position: 'centre' })
+      .resize(W, H, { fit: 'cover', position: vr.position })
+      .modulate({ hue: vr.hue, saturation: vr.saturation, brightness: vr.brightness })
       .composite([{ input: Buffer.from(overlay), top: 0, left: 0 }, ...flagComposites])
       .png()
       .toFile(filePath);
-    logger.info('news-card', `Rendered card ${filename} (${input.category ?? 'Global'}, AI bg${input.country ? `, flag ${input.country.iso}` : ''})`);
+    logger.info('news-card', `Rendered card ${filename} (${input.category ?? 'Global'}, AI bg, var ${vr.position}/h${vr.hue}${input.country ? `, flag ${input.country.iso}` : ''})`);
     return { filePath, filename };
   }
 
