@@ -4,7 +4,7 @@ import { SenderBot, validateContentSafety } from '../content-center';
 import { renderNewsCard } from '../news-card';
 import { funnelUrl, SITE_BASE, UTM } from '../funnel';
 import { collectPromos, selectPromo, PromoItem } from '../promo-radar';
-import { renderBrandedBanner } from '../promo-radar/banner';
+import { renderBrandedBanner, renderBrandFallback } from '../promo-radar/banner';
 import { AutopublishStore } from './index';
 import { logger } from '../../src/logger';
 
@@ -176,6 +176,13 @@ export async function promoAutopublishTick(ctx: PromoTickContext): Promise<Promo
     let imagePath = ctx.banner === false
       ? null
       : await renderBrandedBanner(cardId, promo.url, { outDir: ctx.cardDir });
+    // No usable campaign banner → branded brand-card (exchange logo + name in
+    // the CBW gold frame), not a bare news card. Final fail-open: news card.
+    if (!imagePath) {
+      imagePath = await renderBrandFallback(cardId, promo.exchangeSlug, promo.exchangeName, {
+        outDir: ctx.cardDir, label: 'BONUS ALERT',
+      });
+    }
     if (!imagePath) {
       const card = await renderNewsCard(cardId, {
         title: promo.title,

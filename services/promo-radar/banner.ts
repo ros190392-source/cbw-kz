@@ -72,6 +72,101 @@ export function frameOverlaySvg(label = 'BONUS ALERT'): string {
   </svg>`;
 }
 
+// ── Branded fallback card ─────────────────────────────────────────────────────
+
+/**
+ * Per-exchange brand color, used when the announcement page yields no usable
+ * banner. Drawn into our own card so the Bonus Alert still looks like a real
+ * exchange creative (big name + logo glyph in the CBW gold frame) instead of a
+ * bare text post with Telegram's generic link preview.
+ */
+const BRAND: Record<string, string> = {
+  binance: '#F0B90B',
+  bybit: '#F7A600',
+  kucoin: '#24AE8F',
+  okx: '#1A1A1A',
+  bitget: '#00CED1',
+  mexc: '#00B897',
+  gate: '#5C4DFF',
+  htx: '#2A5ADA',
+  kraken: '#7B5BFF',
+  coinbase: '#0052FF',
+};
+
+/** Relative luminance of a #RRGGBB color (0 = black, 1 = white). */
+function luminance(hex: string): number {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16) / 255;
+  const g = parseInt(h.slice(2, 4), 16) / 255;
+  const b = parseInt(h.slice(4, 6), 16) / 255;
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** Iconic Binance 5-square diamond; other exchanges get a monogram disc. */
+function brandGlyphSvg(slug: string, name: string, cx: number, cy: number, r: number, color: string): string {
+  // Brand color on a dark canvas: if the brand is near-black (OKX), draw the
+  // glyph light instead so it stays visible.
+  const fill = luminance(color) < 0.22 ? '#F4F4F5' : color;
+  if (slug === 'binance') {
+    const s = r * 0.62;
+    const sq = (x: number, y: number) =>
+      `<rect x="${x - s / 2}" y="${y - s / 2}" width="${s}" height="${s}" rx="${s * 0.12}" fill="${fill}" transform="rotate(45 ${x} ${y})"/>`;
+    return sq(cx, cy) + sq(cx, cy - r) + sq(cx, cy + r) + sq(cx - r, cy) + sq(cx + r, cy);
+  }
+  const initial = (name.trim()[0] ?? '?').toUpperCase();
+  const ink = luminance(fill) < 0.5 ? '#FFFFFF' : DARK;
+  return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}"/>
+    <text x="${cx}" y="${cy + r * 0.36}" text-anchor="middle" font-family="Arial" font-weight="900" font-size="${r * 1.05}" fill="${ink}">${initial}</text>`;
+}
+
+/**
+ * Render a branded brand-card for an exchange (no external image needed):
+ * dark canvas + brand-color glow, the exchange logo glyph, the exchange name
+ * in large type, all inside the CBW gold frame with the BONUS ALERT chip and
+ * domain pill. Always succeeds (returns the PNG path) unless disk I/O fails.
+ */
+export async function renderBrandFallback(
+  id: string,
+  slug: string,
+  name: string,
+  opts: { outDir?: string; label?: string } = {},
+): Promise<string | null> {
+  try {
+    const color = BRAND[slug] ?? GOLD;
+    const cx = W / 2;
+    const glyphCy = 282;
+    const glyphR = 96;
+    const nameSize = name.length > 9 ? 92 : 116;
+    const base = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <radialGradient id="glow" cx="50%" cy="38%" r="65%">
+          <stop offset="0%" stop-color="${color}" stop-opacity="0.30"/>
+          <stop offset="100%" stop-color="${DARK}" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+      <rect width="${W}" height="${H}" fill="${DARK}"/>
+      <rect width="${W}" height="${H}" fill="url(#glow)"/>
+      ${brandGlyphSvg(slug, name, cx, glyphCy, glyphR, color)}
+      <text x="${cx}" y="500" text-anchor="middle" font-family="Arial" font-weight="900" font-size="${nameSize}" fill="#FFFFFF" letter-spacing="2">${name}</text>
+    </svg>`;
+
+    const outDir = opts.outDir ?? path.join(process.cwd(), 'data', 'cards');
+    fs.mkdirSync(outDir, { recursive: true });
+    const outPath = path.join(outDir, `${id}.png`);
+
+    await sharp(Buffer.from(base))
+      .composite([{ input: Buffer.from(frameOverlaySvg(opts.label)) }])
+      .png()
+      .toFile(outPath);
+
+    logger.info('promo-banner', `Brand fallback card for ${id} (${slug})`);
+    return outPath;
+  } catch (err) {
+    logger.warn('promo-banner', `Brand fallback failed for ${id}: ${(err as Error).message}`);
+    return null;
+  }
+}
+
 /**
  * Download the official banner and wrap it in the CBW frame.
  * Returns the rendered PNG path, or null on any failure.

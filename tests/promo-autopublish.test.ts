@@ -12,7 +12,7 @@ import {
   buildSpotlightCaption,
 } from '../services/autopublish/promo';
 import { isExchangeStory } from '../services/autopublish/news';
-import { looksGeneric, frameOverlaySvg } from '../services/promo-radar/banner';
+import { looksGeneric, frameOverlaySvg, renderBrandFallback } from '../services/promo-radar/banner';
 import { AutopublishStore } from '../services/autopublish';
 import { PromoItem } from '../services/promo-radar';
 
@@ -169,6 +169,24 @@ describe('banner helpers', () => {
     expect(svg).toContain('BONUS ALERT');
     expect(svg).toContain('CryptoBonusWorld.com');
     expect(svg).toContain('#E7B53C'); // gold
+  });
+
+  it('renders a branded fallback card (PNG) when no og:image is available', async () => {
+    const dir = tmpDir();
+    const out = await renderBrandFallback('fallback-binance', 'binance', 'Binance', { outDir: dir, label: 'BONUS ALERT' });
+    expect(out).toBeTruthy();
+    expect(fs.existsSync(out!)).toBe(true);
+    const buf = fs.readFileSync(out!);
+    // PNG magic number — proves a real image was produced, not a stub.
+    expect(buf.slice(0, 4).toString('hex')).toBe('89504e47');
+    expect(buf.length).toBeGreaterThan(5_000);
+  });
+
+  it('renders a fallback for an unknown exchange (monogram disc)', async () => {
+    const dir = tmpDir();
+    const out = await renderBrandFallback('fallback-x', 'someexch', 'SomeExch', { outDir: dir });
+    expect(out).toBeTruthy();
+    expect(fs.existsSync(out!)).toBe(true);
   });
 });
 
