@@ -5,6 +5,7 @@ import { renderNewsCard, detectCountry } from '../news-card';
 import { buildFunnelFooter, detectExchange } from '../funnel';
 import { renderBrandedBanner } from '../promo-radar/banner';
 import { AutopublishStore } from './index';
+import { normalizeTitle } from '../../src/storage';
 import { logger } from '../../src/logger';
 
 /**
@@ -73,6 +74,64 @@ export function isExchangeStory(text: string): boolean {
   return EXCHANGE_TERMS.some((k) => t.includes(k));
 }
 
+// ── Cross-day duplicate guard ─────────────────────────────────────────────────
+
+/**
+ * How far back to remember already-published stories when checking a new
+ * candidate for duplication. The same story routinely resurfaces a day later
+ * from a *different* source (different link, slightly reworded headline), so a
+ * 36h freshness window is not enough — we look back several days.
+ */
+export const DEDUP_WINDOW_H = 96;
+
+/** Min significant tokens before fuzzy matching kicks in (else require exact). */
+const MIN_DEDUP_TOKENS = 4;
+
+/** Overlap-coefficient threshold above which two headlines are "the same story". */
+const DEDUP_OVERLAP = 0.7;
+
+/** Tokens that carry no story identity — dropped before comparing headlines. */
+const TITLE_STOPWORDS = new Set([
+  'the', 'and', 'for', 'with', 'after', 'into', 'from', 'over', 'amid', 'its',
+  'new', 'now', 'set', 'how', 'why', 'are', 'was', 'has', 'will', 'some', 'get',
+  'gets', 'say', 'says', 'this', 'that', 'than', 'but', 'not', 'out', 'all',
+]);
+
+/** Significant tokens of a headline (length ≥3, non-stopword), from titleNorm. */
+function significantTokens(title: string): Set<string> {
+  return new Set(
+    normalizeTitle(title)
+      .split(' ')
+      .filter((w) => w.length >= 3 && !TITLE_STOPWORDS.has(w)),
+  );
+}
+
+/**
+ * Overlap coefficient |A∩B| / min(|A|,|B|). Robust to one headline being a
+ * reworded superset of the other (added "IPO", "after some get smoked", etc.).
+ */
+function tokenOverlap(a: Set<string>, b: Set<string>): number {
+  const small = a.size <= b.size ? a : b;
+  const big = small === a ? b : a;
+  if (small.size === 0) return 0;
+  let hit = 0;
+  for (const t of small) if (big.has(t)) hit++;
+  return hit / small.size;
+}
+
+/** True when `candidate` tells the same story as one of `published` headlines. */
+export function isDuplicateStory(candidate: string, published: string[]): boolean {
+  const cand = significantTokens(candidate);
+  const candNorm = normalizeTitle(candidate);
+  for (const p of published) {
+    if (normalizeTitle(p) === candNorm) return true; // exact (post-normalization)
+    const pt = significantTokens(p);
+    if (cand.size < MIN_DEDUP_TOKENS || pt.size < MIN_DEDUP_TOKENS) continue;
+    if (tokenOverlap(cand, pt) >= DEDUP_OVERLAP) return true;
+  }
+  return false;
+}
+
 /**
  * Pick the best publishable pending draft: fresh (≤ MAX_NEWS_AGE_H), passes
  * the safety validator, highest score first (ties → newer story).
@@ -82,6 +141,21 @@ export function isExchangeStory(text: string): boolean {
  */
 export function selectTopNewsDraft(drafts: DraftRecord[], now: Date = new Date()): DraftRecord | null {
   const cutoff = now.getTime() - MAX_NEWS_AGE_H * 60 * 60 * 1000;
+
+  // Stories already shipped to the channel in the last few days. The same story
+  // resurfaces from a different source (different link, reworded headline), so
+  // we match on headline meaning, not just link or exact title.
+  const dedupCutoff = now.getTime() - DEDUP_WINDOW_H * 60 * 60 * 1000;
+  const publishedTitles: string[] = [];
+  const publishedLinks = new Set<string>();
+  for (const d of drafts) {
+    if (d.status !== 'published') continue;
+    const t = new Date(d.publishedAt ?? d.publishDate).getTime();
+    if (!Number.isFinite(t) || t < dedupCutoff) continue;
+    publishedTitles.push(d.title ?? '');
+    if (d.link) publishedLinks.add(d.link);
+  }
+
   const eligible = drafts
     .filter(d => d.status === 'pending')
     .filter(d => {
@@ -89,6 +163,8 @@ export function selectTopNewsDraft(drafts: DraftRecord[], now: Date = new Date()
       return Number.isFinite(t) && t >= cutoff;
     })
     .filter(d => validateContentSafety(`${d.title} ${d.text}`).length === 0)
+    .filter(d => !publishedLinks.has(d.link))
+    .filter(d => !isDuplicateStory(d.title ?? '', publishedTitles))
     .sort((a, b) =>
       (b.scoreTotal ?? 0) - (a.scoreTotal ?? 0) ||
       (b.publishDate ?? '').localeCompare(a.publishDate ?? ''),
