@@ -35,11 +35,21 @@ export async function fetchOgImage(pageUrl: string): Promise<string | null> {
     });
     if (!res.ok) return null;
     const html = await res.text();
-    const m =
-      html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) ??
-      html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
-    const url = m?.[1] ?? null;
-    return url && url.startsWith('https://') ? url : null;
+    // Try, in order: og:image, twitter:image(:src), then <link rel=image_src>.
+    // More sources → the real article photo lands far more often (and those
+    // are naturally all different), instead of falling back to a category card.
+    const patterns = [
+      /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
+      /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i,
+      /<meta[^>]+name=["']twitter:image(?::src)?["'][^>]+content=["']([^"']+)["']/i,
+      /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image(?::src)?["']/i,
+      /<link[^>]+rel=["']image_src["'][^>]+href=["']([^"']+)["']/i,
+    ];
+    for (const re of patterns) {
+      const url = html.match(re)?.[1];
+      if (url && url.startsWith('https://')) return url;
+    }
+    return null;
   } catch {
     return null;
   }

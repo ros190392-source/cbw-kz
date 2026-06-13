@@ -68,6 +68,27 @@ export function bgPathFor(category: string | null, bgDir: string = DEFAULT_BG_DI
   return fs.existsSync(fallback) ? fallback : null;
 }
 
+/**
+ * All background variants for a category: bg_<key>.png plus bg_<key>_2.png,
+ * bg_<key>_3.png … Lets two same-category cards use *different* base images
+ * (rotated per post), not just a re-tint of one. Falls back to global, then [].
+ */
+export function bgVariantsFor(category: string | null, bgDir: string = DEFAULT_BG_DIR): string[] {
+  const collect = (key: string): string[] => {
+    const out: string[] = [];
+    const base = path.join(bgDir, `bg_${key}.png`);
+    if (fs.existsSync(base)) out.push(base);
+    for (let i = 2; i <= 9; i++) {
+      const v = path.join(bgDir, `bg_${key}_${i}.png`);
+      if (fs.existsSync(v)) out.push(v);
+    }
+    return out;
+  };
+  const own = collect(bgKeyFor(category));
+  if (own.length) return own;
+  return collect('global');
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 const esc = (s: string) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -106,8 +127,10 @@ export function cardVariation(id: string) {
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+  const bgRoll = rng(); // which background variant to use (pulled first → stable)
   const pick = <T,>(arr: readonly T[]): T => arr[Math.floor(rng() * arr.length)];
   return {
+    bgRoll,
     position: pick(['left', 'centre', 'right', 'top', 'left top', 'right top', 'left bottom', 'right bottom'] as const),
     hue: pick([-26, -14, 0, 12, 22, 34] as const),
     saturation: +(0.95 + rng() * 0.25).toFixed(3),
@@ -191,7 +214,11 @@ export async function renderNewsCard(
   const H = CARD_H;
   const accent = accentFor(input.category);
   const x = Math.round(W * 0.06);
-  const bgPath = bgPathFor(input.category, opts.bgDir);
+  // Per-post visual variation (seeded by id) + pick one of the category's
+  // background variants so two same-category cards differ in base image too.
+  const vr = cardVariation(id);
+  const bgVariants = bgVariantsFor(input.category, opts.bgDir);
+  const bgPath = bgVariants.length ? bgVariants[Math.floor(vr.bgRoll * bgVariants.length)] : null;
 
   // Headline: up to 4 lines, font scales down for long titles.
   const lines = wrapHeadline(input.title, 26, 4);
@@ -258,7 +285,6 @@ export async function renderNewsCard(
     // glow, then a legibility scrim (darker on the left where the headline
     // sits, darker at the bottom for the footer), then the text layer. The
     // seeded crop + color grade + glow corner keep same-category cards distinct.
-    const vr = cardVariation(id);
     const glowXY = { tr: [W, 0], br: [W, H], tl: [0, 0] }[vr.glowCorner];
     const overlay = `
 <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
