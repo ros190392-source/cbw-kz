@@ -23,6 +23,9 @@ const H = 720;
 const GOLD = '#E7B53C';
 const DARK = '#0B1220';
 
+/** Bundled official exchange logos (white rounded tiles), keyed by slug. */
+const LOGO_DIR = path.join(process.cwd(), 'assets', 'exchange-logos');
+
 /** Extract the og:image URL from an announcement page, or null. */
 export async function fetchOgImage(pageUrl: string): Promise<string | null> {
   try {
@@ -144,15 +147,21 @@ export async function renderBrandFallback(
   try {
     const color = BRAND[slug] ?? GOLD;
     const cx = W / 2;
-    const glyphCy = 270;
-    const glyphR = 92;
-    const nameSize = name.length > 9 ? 88 : 112;
+    const glyphCy = 248;
+    const glyphR = 88;
+    const nameSize = name.length > 9 ? 84 : 104;
     const haloFill = luminance(color) < 0.22 ? '#FFFFFF' : color;
     // Soft halo behind the logo — layered translucent discs (no SVG filter
-    // dependency), gives the glyph depth on the dark canvas.
+    // dependency), gives the logo depth on the dark canvas.
     const halo = [2.6, 1.9, 1.35]
       .map((m, i) => `<circle cx="${cx}" cy="${glyphCy}" r="${glyphR * m}" fill="${haloFill}" fill-opacity="${[0.05, 0.08, 0.12][i]}"/>`)
       .join('');
+
+    // Prefer the exchange's real official logo (bundled tile); fall back to a
+    // drawn glyph/monogram only when no logo asset exists for this slug.
+    const logoFile = path.join(LOGO_DIR, `${slug}.png`);
+    const hasLogo = fs.existsSync(logoFile);
+
     const base = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
@@ -167,19 +176,24 @@ export async function renderBrandFallback(
       <rect width="${W}" height="${H}" fill="url(#bg)"/>
       <rect width="${W}" height="${H}" fill="url(#glow)"/>
       ${halo}
-      ${brandGlyphSvg(slug, name, cx, glyphCy, glyphR, color)}
-      <text x="${cx}" y="496" text-anchor="middle" font-family="Arial" font-weight="900" font-size="${nameSize}" fill="#FFFFFF" letter-spacing="2">${name}</text>
-      <rect x="${cx - 120}" y="528" width="240" height="4" rx="2" fill="${GOLD}" fill-opacity="0.85"/>
+      ${hasLogo ? '' : brandGlyphSvg(slug, name, cx, glyphCy, glyphR, color)}
+      <text x="${cx}" y="512" text-anchor="middle" font-family="Arial" font-weight="900" font-size="${nameSize}" fill="#FFFFFF" letter-spacing="2">${name}</text>
+      <rect x="${cx - 120}" y="544" width="240" height="4" rx="2" fill="${GOLD}" fill-opacity="0.85"/>
     </svg>`;
 
     const outDir = opts.outDir ?? path.join(process.cwd(), 'data', 'cards');
     fs.mkdirSync(outDir, { recursive: true });
     const outPath = path.join(outDir, `${id}.png`);
 
-    await sharp(Buffer.from(base))
-      .composite([{ input: Buffer.from(frameOverlaySvg(opts.label)) }])
-      .png()
-      .toFile(outPath);
+    const layers: sharp.OverlayOptions[] = [];
+    if (hasLogo) {
+      const TILE = 272;
+      const logo = await sharp(logoFile).resize(TILE, TILE, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).toBuffer();
+      layers.push({ input: logo, top: Math.round(glyphCy - TILE / 2), left: Math.round(cx - TILE / 2) });
+    }
+    layers.push({ input: Buffer.from(frameOverlaySvg(opts.label)) });
+
+    await sharp(Buffer.from(base)).composite(layers).png().toFile(outPath);
 
     logger.info('promo-banner', `Brand fallback card for ${id} (${slug})`);
     return outPath;
