@@ -60,6 +60,8 @@ export interface AutopublishState {
   postedPromoUrls: string[];
   /** Exchange slug of the last promo post (rotation hint). */
   lastPromoExchange: string | null;
+  /** Organic scheduler's randomized plan for the current UTC day (EPIC 026). */
+  dailyPlan: import('./schedule').DailyPlan | null;
 }
 
 const DEFAULTS: AutopublishState = {
@@ -74,6 +76,7 @@ const DEFAULTS: AutopublishState = {
   lastPromoSlot: null,
   postedPromoUrls: [],
   lastPromoExchange: null,
+  dailyPlan: null,
 };
 
 export class AutopublishStore {

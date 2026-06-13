@@ -162,7 +162,13 @@ export function isDuplicateStory(candidate: string, published: string[]): boolea
  * Exchange stories are preferred outright; the best general story is only a
  * fallback so a slot is never silently skipped when exchange news is quiet.
  */
-export function selectTopNewsDraft(drafts: DraftRecord[], now: Date = new Date()): DraftRecord | null {
+export type NewsLane = 'exchange' | 'global' | 'any';
+
+export function selectTopNewsDraft(
+  drafts: DraftRecord[],
+  now: Date = new Date(),
+  lane: NewsLane = 'any',
+): DraftRecord | null {
   const cutoff = now.getTime() - MAX_NEWS_AGE_H * 60 * 60 * 1000;
 
   // Stories already shipped to the channel in the last few days. The same story
@@ -192,6 +198,16 @@ export function selectTopNewsDraft(drafts: DraftRecord[], now: Date = new Date()
       (b.scoreTotal ?? 0) - (a.scoreTotal ?? 0) ||
       (b.publishDate ?? '').localeCompare(a.publishDate ?? ''),
     );
+
+  // Lane filter: 'exchange' → only exchange stories; 'global' → only
+  // non-exchange (macro/markets/regulation); 'any' → exchange-first with a
+  // general fallback (legacy single-lane behavior).
+  if (lane === 'exchange') {
+    return eligible.find(d => isExchangeStory(`${d.title} ${d.text}`)) ?? null;
+  }
+  if (lane === 'global') {
+    return eligible.find(d => !isExchangeStory(`${d.title} ${d.text}`)) ?? null;
+  }
   const exchange = eligible.find(d => isExchangeStory(`${d.title} ${d.text}`));
   return exchange ?? eligible[0] ?? null;
 }
